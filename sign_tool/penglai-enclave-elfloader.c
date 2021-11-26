@@ -1,6 +1,5 @@
 #include "penglai-enclave-elfloader.h"
 
-
 int penglai_enclave_load_NOBITS_section(enclave_mem_t* enclave_mem, void * elf_sect_addr, int elf_sect_size)
 {
 	vaddr_t addr;
@@ -13,6 +12,7 @@ int penglai_enclave_load_NOBITS_section(enclave_mem_t* enclave_mem, void * elf_s
 			size = elf_sect_size % RISCV_PGSIZE;
 		else
 			size = RISCV_PGSIZE;
+		printf("enclave_new_page paddr: 0x%08x%08x, set 0 size: %08x\n", *((int*)&enclave_new_page+1), *((int*)&enclave_new_page), size);
 		memset((void *) enclave_new_page, 0, size);
 	}
 	return 0;
@@ -71,6 +71,7 @@ int penglai_enclave_loadelf(enclave_mem_t*enclave_mem, void* elf_ptr, unsigned l
 		{
 			vaddr_t elf_sect_addr = elf_sect_hdr.sh_addr;
 			int elf_sect_size = elf_sect_hdr.sh_size;
+			printf("[penglai_enclave_loadelf] Load NOBITS section: sh_addr: 0x%08x%08x, sh_size: %d\n",*((int*)&elf_sect_addr+1), *((int*)&elf_sect_addr), elf_sect_size);
 			if (penglai_enclave_load_NOBITS_section(enclave_mem,(void *)elf_sect_addr,elf_sect_size) < 0)
 			{
 				printf("KERNEL MODULE: penglai enclave load NOBITS  section failed\n");
@@ -91,12 +92,13 @@ int penglai_enclave_loadelf(enclave_mem_t*enclave_mem, void* elf_ptr, unsigned l
 		elf_prog_addr = elf_prog_hdr.p_vaddr;
 		elf_prog_size = elf_prog_hdr.p_filesz;
 		elf_prog_infile_addr = (vaddr_t) elf_ptr + elf_prog_hdr.p_offset;
+		printf("[penglai_enclave_loadelf] Load program segment: prog_addr: 0x%08x%08x, prog_size: %d\n",*((int*)&elf_prog_addr+1), *((int*)&elf_prog_addr), elf_prog_size);
 		if (penglai_enclave_load_program(enclave_mem, elf_prog_infile_addr, (void *)elf_prog_addr, elf_prog_size) < 0)
 		{
 			printf("KERNEL MODULE: penglai enclave load program failed\n");
 			return -1;
 		}
-		printf("[Penglai Driver@%s] elf_prog_addr:0x%lx elf_prog_size:0x%x, infile_addr:0x%lx", __func__,
+		printf("[Penglai Driver@%s] elf_prog_addr:0x%lx elf_prog_size:0x%x, infile_addr:0x%lx\n", __func__,
 				elf_prog_addr, elf_prog_size, elf_prog_infile_addr);
 		elf_prog_ptr += sizeof(Elf64_Phdr);
 	}
@@ -162,6 +164,28 @@ int penglai_enclave_elfmemsize(void* elf_ptr, int* size)
 		elf_prog_size = elf_prog_hdr.p_filesz;
 		*size = *size + elf_prog_size;
 		elf_prog_ptr += sizeof(Elf64_Phdr);
+	}
+	return 0;
+}
+
+int map_untrusted_mem(enclave_mem_t* enclave_mem, vaddr_t vaddr, paddr_t paddr, unsigned long size)
+{
+	vaddr_t addr = vaddr;
+
+	for (; addr < vaddr + size; addr+=RISCV_PGSIZE) {
+		map_va2pa(enclave_mem, addr, paddr, ENCLAVE_UNTRUSTED_PAGE);
+		paddr += RISCV_PGSIZE;
+	}
+	return 0;
+}
+
+int map_kbuffer(enclave_mem_t* enclave_mem, vaddr_t vaddr, paddr_t paddr, unsigned long size)
+{
+	vaddr_t addr = vaddr;
+
+	for (; addr < vaddr + size; addr += RISCV_PGSIZE) {
+		map_va2pa(enclave_mem, addr, paddr, ENCLAVE_KBUFFER_PAGE);
+		paddr += RISCV_PGSIZE;
 	}
 	return 0;
 }

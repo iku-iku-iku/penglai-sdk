@@ -43,6 +43,43 @@ unsigned int total_enclave_page(int elf_size, int stack_size)
 	return total_pages;
 }
 
+int alloc_umem(unsigned long untrusted_mem_size, unsigned long* untrusted_mem_ptr, enclave_mem_t* enclave_mem)
+{
+	int ret = 0;
+	char* addr = (char*)malloc(untrusted_mem_size + RISCV_PGSIZE);
+	if(!addr)
+	{
+		printf("KERNEL MODULE: can not alloc untrusted mem \n");
+		return -1;
+	}
+
+    vaddr_t page_addr = (vaddr_t)PAGE_UP((unsigned long)addr);
+    memset((void*)page_addr, 0, untrusted_mem_size);
+	*untrusted_mem_ptr = page_addr;
+	map_untrusted_mem(enclave_mem, DEFAULT_UNTRUSTED_PTR, page_addr, untrusted_mem_size);
+
+	return ret;
+}
+
+int alloc_kbuffer(unsigned long kbuffer_size, unsigned long* kbuffer_ptr, enclave_mem_t* enclave_mem)
+{
+	int ret = 0;
+    kbuffer_size = 0x1 << (ilog2(kbuffer_size - 1) + 1);
+    char* addr = (char*)malloc(kbuffer_size + RISCV_PGSIZE);
+	if(!addr)
+	{
+		printf("KERNEL MODULE: can not alloc untrusted mem \n");
+		return -1;
+	}
+
+    vaddr_t page_addr = (vaddr_t)PAGE_UP((unsigned long)addr);
+    memset((void*)page_addr, 0, kbuffer_size);
+	*kbuffer_ptr = page_addr;
+	map_kbuffer(enclave_mem, ENCLAVE_DEFAULT_KBUFFER, page_addr, kbuffer_size);
+
+	return ret;
+}
+
 int penglai_enclave_create(struct penglai_enclave_user_param* enclave_param)
 {
 	void *elf_ptr = (void*)enclave_param->elf_ptr;
@@ -70,10 +107,16 @@ int penglai_enclave_create(struct penglai_enclave_user_param* enclave_param)
     printf("[penglai_enclave_create] total_pages: %d\n", total_pages);
 	
     enclave_mem_t* enclave_mem = malloc(sizeof(enclave_mem_t));
-	untrusted_mem_t* untrusted_mem = malloc(sizeof(untrusted_mem_t));
     int size = total_pages * RISCV_PGSIZE;
-    char* addr = (char*)malloc(size * sizeof(char));
-	enclave_mem_int(enclave_mem, (vaddr_t)addr, size, (paddr_t)addr);
+    char* addr = (char*)malloc(size + RISCV_PGSIZE);
+    if(!addr)
+	{
+		printf("KERNEL MODULE: can not alloc untrusted mem \n");
+		return -1;
+	}
+    vaddr_t page_addr = (vaddr_t)PAGE_UP((unsigned long)addr);
+    // memset(addr, 0, size * sizeof(char));
+	enclave_mem_int(enclave_mem, page_addr, size, page_addr);
     
     elf_entry = 0;
 	if(penglai_enclave_eapp_preprare(enclave_mem, elf_ptr, elf_size,
@@ -86,12 +129,20 @@ int penglai_enclave_create(struct penglai_enclave_user_param* enclave_param)
 		printf("KERNEL MODULE: elf_entry reset is failed \n");
 	}
 
-    // unsigned char enclave_hash[HASH_SIZE];
-    // unsigned char output_hash[HASH_SIZE];
+    untrusted_mem_size = 0x1 << (ilog2(untrusted_mem_size - 1) + 1);
+	if((untrusted_mem_ptr == 0) && (untrusted_mem_size > 0))
+	{
+		alloc_umem(untrusted_mem_size, &untrusted_mem_ptr, enclave_mem);
+	}
+	alloc_kbuffer(ENCLAVE_DEFAULT_KBUFFER_SIZE, &kbuffer_ptr, enclave_mem);
+
+    unsigned char enclave_hash[HASH_SIZE];
+    unsigned char output_hash[HASH_SIZE];
     // uintptr_t nonce = 12345;
-    // hash_enclave(elf_entry, enclave_mem, (void*)enclave_hash, 0);
+    hash_enclave(elf_entry, enclave_mem, (void*)enclave_hash, 0);
 	// update_enclave_hash((char *)output_hash, (char *)enclave_hash, nonce);
-    // printf("[penglai_enclave_create] hash with nonce: ");
+    printf("[penglai_enclave_create] hash with nonce: \n");
+    printHex(enclave_hash, HASH_SIZE);
     // printHex(output_hash, HASH_SIZE);
     
     free(addr);

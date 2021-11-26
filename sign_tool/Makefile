@@ -12,7 +12,7 @@ GM:
 	make -C gm
 
 SIGN_TOOL: GM
-	$(CC) -static -o sign_tool -I $(PENGLAI_SDK)/lib/host/include/ sign_tool.c penglai-enclave-elfloader.c penglai-enclave-page.c $(PENGLAI_SDK)/lib/libpenglai-enclave-host.a -lpthread
+	$(CC) -static -o sign_tool -I $(PENGLAI_SDK)/lib/host/include/ $(CUR_SOURCE) libpenglai-signtool_gm.a $(PENGLAI_SDK)/lib/libpenglai-enclave-host.a -lpthread
 
 clean:
 	make -C gm clean

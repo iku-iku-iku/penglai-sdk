@@ -49,9 +49,10 @@ void* create_enclave(void* args0)
   else
   {
     
-    printf("host:%d: enclave attest\n", i);
-    PLenclave_attest(enclave, NONCE);
-    printHex((unsigned char*)(enclave->attest_param.report.enclave.signature), 64);
+    // printf("host:%d: enclave attest\n", i);
+    // PLenclave_attest(enclave, NONCE);
+    // // printHex((unsigned char*)(enclave->attest_param.report.enclave.signature), 64);
+    // printHex((unsigned char*)(enclave->attest_param.report.enclave.hash), HASH_SIZE);
 
     printf("host:%d: enclave run\n", i);
     PLenclave_run(enclave);

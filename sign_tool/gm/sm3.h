@@ -46,6 +46,8 @@ void sm3_update(struct sm3_context *ctx, unsigned char *input, int ilen);
  */
 void sm3_final(struct sm3_context *ctx, unsigned char output[32]);
 
+void sm3_state_print(struct sm3_context *ctx, unsigned char output[32]);
+
 /**
  * \brief          Output = SM3( input buffer )
  *

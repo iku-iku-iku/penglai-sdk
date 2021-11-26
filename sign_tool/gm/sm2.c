@@ -11,11 +11,6 @@
 #include <stddef.h>
 #include <string.h>
 
-void *memset(void *s, int c, size_t count)
-{
-  return memset(s, c, count);
-}
-
 static int mem_cmp(char* s1, char* s2, int count)
 {
   int i = 0;

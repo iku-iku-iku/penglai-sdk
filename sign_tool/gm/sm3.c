@@ -239,6 +239,18 @@ void sm3_final(struct sm3_context *ctx, unsigned char output[32])
   PUT_ULONG_BE( ctx->state[7], output, 28 );
 }
 
+void sm3_state_print(struct sm3_context *ctx, unsigned char output[32])
+{
+  PUT_ULONG_BE( ctx->state[0], output,  0 );
+  PUT_ULONG_BE( ctx->state[1], output,  4 );
+  PUT_ULONG_BE( ctx->state[2], output,  8 );
+  PUT_ULONG_BE( ctx->state[3], output, 12 );
+  PUT_ULONG_BE( ctx->state[4], output, 16 );
+  PUT_ULONG_BE( ctx->state[5], output, 20 );
+  PUT_ULONG_BE( ctx->state[6], output, 24 );
+  PUT_ULONG_BE( ctx->state[7], output, 28 );
+}
+
 /*
  * output = SM3( input buffer )
  */
