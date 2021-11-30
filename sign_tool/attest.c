@@ -39,14 +39,14 @@ static int hash_enclave_mem(struct sm3_context *hash_ctx, pt_entry_t* ptes, int 
   if(level <= 0)
     return 1;
 
-  print_level(level);
+  // print_level(level);
 
   for(pte = ptes, i = 0; i < pte_per_page; pte += 1, i += 1)
   {
     if(!(*pte & PTE_V))
     {
       if(hash_curr_va == 0){
-        printf("[hash_curr_va] this page isn't valid, index: %d, pte: 0x%02x\n", (int)i, *((unsigned char*)pte));
+        // printf("[hash_curr_va] this page isn't valid, index: %d, pte: 0x%02x\n", (int)i, *((unsigned char*)pte));
       }
       hash_curr_va = 1;
       continue;
@@ -64,13 +64,13 @@ static int hash_enclave_mem(struct sm3_context *hash_ctx, pt_entry_t* ptes, int 
     {
       if(hash_curr_va)
       {
-        printf("[hash_curr_va] last level va: 0x%08x%08x, curr_va: 0x%08x%08x, index: %d\n", *((int*)&va+1), *((int*)&va), *((int*)&curr_va+1), *((int*)&curr_va), (int)i);
+        // printf("[hash_curr_va] last level va: 0x%08x%08x, curr_va: 0x%08x%08x, index: %d\n", *((int*)&va+1), *((int*)&va), *((int*)&curr_va+1), *((int*)&curr_va), (int)i);
         sm3_update(hash_ctx, (unsigned char*)&curr_va, sizeof(uintptr_t));
-        print_sm3_state(hash_ctx, "curr_va");
+        // print_sm3_state(hash_ctx, "curr_va");
         //update hash with  page attribution
-        printf("[hash_curr_va] pte: 0x%02x\n", *((unsigned char*)pte));
+        // printf("[hash_curr_va] pte: 0x%02x\n", *((unsigned char*)pte));
         sm3_update(hash_ctx, (unsigned char*)pte, 1);
-        print_sm3_state(hash_ctx, "pte_cof");
+        // print_sm3_state(hash_ctx, "pte_cof");
         hash_curr_va = 0;
       }
 
@@ -78,13 +78,13 @@ static int hash_enclave_mem(struct sm3_context *hash_ctx, pt_entry_t* ptes, int 
       if(level == 1)
       {
         sm3_update(hash_ctx, (void*)pa, 1 << RISCV_PGSHIFT);
-        print_sm3_state(hash_ctx, "4k_page");
+        // print_sm3_state(hash_ctx, "4k_page");
       }
       //2M page
       else if(level == 2)
       {
         sm3_update(hash_ctx, (void*)pa, 1 << (RISCV_PGSHIFT + RISCV_PGLEVEL_BITS));
-        print_sm3_state(hash_ctx, "2M_page");
+        // print_sm3_state(hash_ctx, "2M_page");
       }
     }
     else
@@ -93,7 +93,7 @@ static int hash_enclave_mem(struct sm3_context *hash_ctx, pt_entry_t* ptes, int 
     }
   }
 
-  print_level(level + 1);
+  // print_level(level + 1);
 
   return hash_curr_va;
 }

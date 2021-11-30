@@ -10,7 +10,9 @@ int penglai_enclave_eapp_preprare(
 		unsigned long size, 
 		vaddr_t * elf_entry_point, 
 		vaddr_t stack_ptr, 
-		int stack_size);
+		int stack_size,
+		unsigned long *meta_offset,
+		unsigned long *meta_blocksize);
 
 int penglai_enclave_elfmemsize(void* elf_ptr, int* size);
 

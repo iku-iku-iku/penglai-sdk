@@ -66,7 +66,7 @@ void init_free_mem(free_mem_t* free_mem, vaddr_t base, unsigned int count)
 	vaddr_t cur;
 	int i;
 	cur = base;
-	printf("init_free_mem: count: %d\n", count);
+	// printf("init_free_mem: count: %d\n", count);
 	for(i = 0; i < count; i++)
 	{
 		put_free_page(free_mem, cur);
@@ -110,7 +110,7 @@ static inline int get_pt_index(vaddr_t vaddr, int level)
 static inline int create_ptd_page(free_mem_t* free_mem, pt_entry_t* pte)
 {
 	vaddr_t addr = get_free_mem(free_mem);
-	printf("new page table: 0x%08x%08x\n", *((int*)&addr+1), *((int*)&addr));
+	// printf("new page table: 0x%08x%08x\n", *((int*)&addr+1), *((int*)&addr));
 	if(addr == 0){
 		return -1;
 	}
@@ -129,12 +129,12 @@ static pt_entry_t * walk_enclave_pt(free_mem_t* free_mem, pt_entry_t* enclave_ro
 	{
 		int pt_index = get_pt_index(vaddr, i);
 		// if(counter < 20)
-		printf("walk_enclave_pt: level: %d, index: %d, ", i, pt_index);
+		// printf("walk_enclave_pt: level: %d, index: %d, ", i, pt_index);
 		pt_entry_t pt_entry = pgdir[pt_index];
-		printf("pte_addr: %p", &pgdir[pt_index]);
+		// printf("pte_addr: %p", &pgdir[pt_index]);
 		if(!(pt_entry & PTE_V))
 		{
-			printf(" --not valid\n");
+			// printf(" --not valid\n");
 			if(create)
 			{
 				if(create_ptd_page(free_mem, &pgdir[pt_index]) < 0)
@@ -145,13 +145,13 @@ static pt_entry_t * walk_enclave_pt(free_mem_t* free_mem, pt_entry_t* enclave_ro
 			else
 				printf("KERNEL MODULE: walk_enclave_pt fault\n");
 		}
-		else{
-			printf(" --valid\n");
-		}
+		// else{
+		// 	printf(" --valid\n");
+		// }
 		pgdir = (pt_entry_t*)pte2va(pt_entry);
 	}
 
-	printf("walk_enclave_pt: level: %d, index: %d\n", 2, get_pt_index(vaddr, RISCV_PT_LEVEL-1));
+	// printf("walk_enclave_pt: level: %d, index: %d\n", 2, get_pt_index(vaddr, RISCV_PT_LEVEL-1));
 	return &pgdir[get_pt_index(vaddr, RISCV_PT_LEVEL-1)];
 }
 

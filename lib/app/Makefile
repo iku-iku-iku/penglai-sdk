@@ -14,7 +14,10 @@ C_OBJS = $(patsubst %.c,%.o,$(C_SRCS))
 
 TARGET = ../libpenglai-enclave-eapp.a
 
-all: $(TARGET)
+all: $(TARGET) METADATA
+
+METADATA:
+	$(CC) $(CFLAGS) -c src/metadata_sec.S -o src/metadata_sec.o
 
 $(A_OBJS): %.o : %.S
 	$(CC) $(CFLAGS) -I$(INCLUDE_DIR) -c $< -o $@
@@ -26,3 +29,4 @@ $(TARGET): $(A_OBJS) $(C_OBJS)
 
 clean:
 	rm -f $(A_OBJS) $(C_OBJS) $(TARGET)
+	rm -f src/metadata_sec.o

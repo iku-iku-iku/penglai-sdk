@@ -96,7 +96,7 @@ int penglai_enclave_create(struct penglai_enclave_user_param* enclave_param)
 	unsigned long untrusted_mem_ptr = enclave_param->untrusted_mem_ptr;
 	unsigned long kbuffer_ptr = ENCLAVE_DEFAULT_KBUFFER;
 	unsigned int total_pages = total_enclave_page(elf_size, stack_size);
-	unsigned long free_mem, elf_entry;
+	unsigned long free_mem, elf_entry, meta_offset, meta_blocksize;
 	unsigned long order = ilog2(total_pages- 1) + 1;
 
 	total_pages = 0x1 << order;
@@ -120,7 +120,7 @@ int penglai_enclave_create(struct penglai_enclave_user_param* enclave_param)
     
     elf_entry = 0;
 	if(penglai_enclave_eapp_preprare(enclave_mem, elf_ptr, elf_size,
-				&elf_entry, STACK_POINT, stack_size))
+				&elf_entry, STACK_POINT, stack_size, &meta_offset, &meta_blocksize))
 	{
 		printf("KERNEL MODULE: penglai_enclave_eapp_preprare is failed\n");
 	}

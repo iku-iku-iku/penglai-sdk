@@ -1,5 +1,7 @@
 #include "penglai-enclave-elfloader.h"
 
+#define	ROUND_TO(x, align)  (((x) + ((align)-1)) & ~((align)-1))
+
 int penglai_enclave_load_NOBITS_section(enclave_mem_t* enclave_mem, void * elf_sect_addr, int elf_sect_size)
 {
 	vaddr_t addr;
@@ -12,7 +14,7 @@ int penglai_enclave_load_NOBITS_section(enclave_mem_t* enclave_mem, void * elf_s
 			size = elf_sect_size % RISCV_PGSIZE;
 		else
 			size = RISCV_PGSIZE;
-		printf("enclave_new_page paddr: 0x%08x%08x, set 0 size: %08x\n", *((int*)&enclave_new_page+1), *((int*)&enclave_new_page), size);
+		// printf("enclave_new_page paddr: 0x%08x%08x, set 0 size: %08x\n", *((int*)&enclave_new_page+1), *((int*)&enclave_new_page), size);
 		memset((void *) enclave_new_page, 0, size);
 	}
 	return 0;
@@ -38,6 +40,71 @@ int penglai_enclave_load_program(enclave_mem_t* enclave_mem, vaddr_t elf_prog_in
 		memcpy((void* )enclave_new_page, (void *)(elf_prog_infile_addr + addr - (vaddr_t)elf_prog_addr), size);
 	}
 	return 0;
+}
+
+int get_meta_property(void* elf_ptr, unsigned long size, unsigned long *meta_offset, unsigned long *meta_blocksize){
+	Elf64_Ehdr elf_hdr;
+	Elf64_Shdr* shdr;
+	int i;
+	bool found = false;
+
+	memcpy(&elf_hdr, elf_ptr, sizeof(Elf64_Ehdr));
+	shdr = (Elf64_Shdr *)((vaddr_t)elf_ptr + elf_hdr.e_shoff);
+	const char *shstrtab = (char *)(elf_ptr + (shdr + elf_hdr.e_shstrndx)->sh_offset);
+
+	/* Loader section */
+	for (i = 0; i < elf_hdr.e_shnum; i++, shdr++)
+	{
+		printf("section [%u] %s: sh_addr = %x, sh_size = %x, sh_offset = %x, sh_name = %x\n", 
+			i, shstrtab + shdr->sh_name, shdr->sh_addr, shdr->sh_size, shdr->sh_offset, shdr->sh_name);
+		if (!strcmp(shstrtab + shdr->sh_name, ".note.penglaimeta"))
+		{
+			found = true;
+			break;
+		}
+	}
+	if (found == false)
+    {
+        printf("ERROR: The enclave image should have '.note.penglaimeta' section\n");
+        return -1;
+    }
+	/* We require that enclaves should have .note.penglaimeta section to store the metadata information
+     * We limit this section is used for metadata only and ISV should not extend this section.
+     *
+     * .note.penglaimeta layout:
+     *
+     * |  namesz         |
+     * |  metadata size  |
+     * |  type           |
+     * |  name           |
+     * |  metadata       |
+     */
+
+    Elf64_Nhdr* note = (elf_ptr + shdr->sh_offset);
+    if (note == NULL)
+	{
+		printf("ERROR: Nhdr is NULL\n");
+		return -1;
+	}
+
+    if (shdr->sh_size != ROUND_TO(sizeof(Elf64_Nhdr) + note->n_namesz + note->n_descsz, shdr->sh_addralign ))
+    {
+        printf("ERROR: The '.note.penglaimeta' section size is not correct.\n");
+        return -1;
+    }
+    
+    const char * meta_name = "penglai_metadata";
+    if (note->n_namesz != (strlen(meta_name)+1) || memcmp((void *)(elf_ptr + shdr->sh_offset + sizeof(Elf64_Nhdr)), meta_name, note->n_namesz))
+    {
+        printf("ERROR: The note in the '.note.penglaimeta' section must be named as \"penglai_metadata\"\n");
+        return -1;
+    }
+
+    *meta_offset = (unsigned long)(shdr->sh_offset + sizeof(Elf64_Nhdr) + note->n_namesz);
+    *meta_blocksize = note->n_descsz;
+
+	printf("success! meta_offset: %d, meta_blocksize: %d\n", *meta_offset, *meta_blocksize);
+    return true;
 }
 
 /* ptr @ user pointer
@@ -105,7 +172,7 @@ int penglai_enclave_loadelf(enclave_mem_t*enclave_mem, void* elf_ptr, unsigned l
 	return 0;
 }
 
-int penglai_enclave_eapp_preprare(enclave_mem_t* enclave_mem,  void* elf_ptr, unsigned long size, vaddr_t * elf_entry_point, vaddr_t stack_ptr, int stack_size)
+int penglai_enclave_eapp_preprare(enclave_mem_t* enclave_mem,  void* elf_ptr, unsigned long size, vaddr_t * elf_entry_point, vaddr_t stack_ptr, int stack_size, unsigned long *meta_offset, unsigned long *meta_blocksize)
 {
 	vaddr_t addr;
 
@@ -119,6 +186,12 @@ int penglai_enclave_eapp_preprare(enclave_mem_t* enclave_mem,  void* elf_ptr, un
 	if(penglai_enclave_loadelf(enclave_mem, elf_ptr, size, elf_entry_point) < 0)
 	{
 		printf("KERNEL MODULE: penglai enclave loadelf failed\n");
+		return -1;
+	}
+
+	if(get_meta_property(elf_ptr, size, meta_offset, meta_blocksize) < 0){
+		printf("KERNEL MODULE: penglai enclave get metadata property failed\n");
+		return -1;
 	}
 
 	return 0;
