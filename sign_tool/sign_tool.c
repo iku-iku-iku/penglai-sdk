@@ -80,7 +80,7 @@ int alloc_kbuffer(unsigned long kbuffer_size, unsigned long* kbuffer_ptr, enclav
 	return ret;
 }
 
-int penglai_enclave_create(struct penglai_enclave_user_param* enclave_param)
+int penglai_enclave_create(struct penglai_enclave_user_param* enclave_param, enclave_css_t* enclave_css, unsigned long* meta_offset_arg)
 {
 	void *elf_ptr = (void*)enclave_param->elf_ptr;
 	int elf_size = 0;
@@ -145,10 +145,58 @@ int penglai_enclave_create(struct penglai_enclave_user_param* enclave_param)
     printHex(enclave_hash, HASH_SIZE);
     // printHex(output_hash, HASH_SIZE);
     
+	memcpy(enclave_css->enclave_hash, enclave_hash, HASH_SIZE);
+	*meta_offset_arg = meta_offset;
+
     free(addr);
     return 0;
 }
 
+int update_metadata(const char *path, const enclave_css_t *enclave_css, uint64_t meta_offset)
+{
+    if(path == NULL || enclave_css == NULL){
+		printf("KERNEL MODULE: can not alloc untrusted mem \n");
+		return -1;
+	};
+
+	FILE *fd = fopen(path, "rb+");
+	if(fd == NULL){
+		printf("open file failed\n");
+		return -1;
+	}
+	fseek(fd, meta_offset, 0);
+	int count = fwrite(enclave_css, sizeof(enclave_css_t),1, fd);
+    fclose(fd);
+	if(count != 1){
+		printf("write byte number is wrong: num: %d\n", count);
+		return -1;
+	}
+	
+	return 0;
+}
+
+int read_metadata(const char *path, enclave_css_t *enclave_css, uint64_t meta_offset)
+{
+    if(path == NULL || enclave_css == NULL){
+		printf("KERNEL MODULE: can not alloc untrusted mem \n");
+		return -1;
+	};
+
+	FILE *fd = fopen(path, "rb");
+	if(fd == NULL){
+		printf("open file failed\n");
+		return -1;
+	}
+	fseek(fd, meta_offset, 0);
+	int count = fread(enclave_css, sizeof(enclave_css_t), 1, fd);
+    fclose(fd);
+	if(count != 1){
+		printf("read byte number is wrong: num: %d\n", count);
+		return -1;
+	}
+	
+	return 0;
+}
 
 int main(int argc, char* argv[])
 {
@@ -186,7 +234,46 @@ int main(int argc, char* argv[])
     enclave->user_param.ocall_buf_size = 0;
     enclave->user_param.resume_type = 0;
 
-    penglai_enclave_create(&enclave->user_param);
+	enclave_css_t enclave_css;
+	unsigned long meta_offset;
+    penglai_enclave_create(&enclave->user_param, &enclave_css, &meta_offset);
+	elf_args_destroy(enclaveFile);
+
+	// printf("[penglai_enclave_create] old zero metadata:\n");
+	// printf("meta offset: %d\n", meta_offset);
+	enclave_css_t new_css;
+	// memset(&new_css, 0, sizeof(enclave_css_t));
+	// read_metadata(eappfile, &new_css, meta_offset);
+	// printf("[penglai_enclave_create] new signature: \n");
+    // printHex(new_css.signature, SIGNATURE_SIZE);
+	// printf("[penglai_enclave_create] new public_key: \n\n\n");
+    // printHex(new_css.user_pub_key, PUBLIC_KEY_SIZE);
+
+	unsigned char private_key[PRIVATE_KEY_SIZE];
+	parse_key_file(private_key, enclave_css.user_pub_key);
+	sign_enclave((struct signature_t *)(enclave_css.signature), enclave_css.enclave_hash, private_key);
+	printf("[penglai_enclave_create] signature: \n");
+    printHex(enclave_css.signature, SIGNATURE_SIZE);
+	// printf("[penglai_enclave_create] private_key: \n");
+    // printHex(private_key, PRIVATE_KEY_SIZE);
+	printf("[penglai_enclave_create] public_key: \n");
+    printHex(enclave_css.user_pub_key, PUBLIC_KEY_SIZE);
+	int ret = verify_enclave((struct signature_t *)(enclave_css.signature), enclave_css.enclave_hash, enclave_css.user_pub_key);
+	if(ret != 0){
+		printf("ERROR: verify enclave_css struct failed!\n");
+	}
+	// update_metadata("prime_signed", &enclave_css, 0);
+	update_metadata(eappfile, &enclave_css, meta_offset);
+
+	printf("\n\n\n[penglai_enclave_create] new zero metadata:\n");
+	printf("meta offset: %d\n", meta_offset);
+	memset(&new_css, 0, sizeof(enclave_css_t));
+	// read_metadata("prime_signed", &new_css, 0);
+	read_metadata(eappfile, &new_css, meta_offset);
+	printf("[penglai_enclave_create] new signature: \n");
+    printHex(new_css.signature, SIGNATURE_SIZE);
+	printf("[penglai_enclave_create] new public_key: \n");
+    printHex(new_css.user_pub_key, PUBLIC_KEY_SIZE);
 
     printf("end\n");
     free(enclave);

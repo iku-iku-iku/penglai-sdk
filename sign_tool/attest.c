@@ -1,7 +1,6 @@
 #include "attest.h"
 #include "gm/sm3.h"
 #include "gm/sm2.h"
-#include "param.h"
 #include <string.h>
 #include <stdio.h>
 
@@ -117,34 +116,20 @@ void hash_enclave(unsigned long entry_point, enclave_mem_t* enclave_mem, void* h
   sm3_final(&hash_ctx, hash);
 }
 
-void update_enclave_hash(char *output, void* hash, uintptr_t nonce_arg)
-{
-  struct sm3_context hash_ctx;
-  uintptr_t nonce = nonce_arg;
-
-  sm3_init(&hash_ctx);
-
-  sm3_update(&hash_ctx, (unsigned char*)(hash), HASH_SIZE);
-
-  sm3_update(&hash_ctx, (unsigned char*)(&nonce), sizeof(uintptr_t));
-
-  sm3_final(&hash_ctx, hash);
-
-  memcpy(output, hash, HASH_SIZE);
+int parse_key_file(void* prikey, void* pubkey){
+  sm2_make_keypair((u8 *)prikey, (ecc_point *)pubkey);
 }
 
-// void sign_enclave(void* signature_arg, void* hash)
-// {
-//   struct signature_t *signature = (struct signature_t*)signature_arg;
-//   sm2_sign((void*)(signature->r), (void*)(signature->s), (void*)SM_PRI_KEY, hash);
-// }
+void sign_enclave(struct signature_t* signature, void* hash, void* prikey)
+{
+  sm2_sign((void*)(signature->r), (void*)(signature->s), prikey, hash);
+}
 
-// int verify_enclave(void* signature_arg, void* hash)
-// {
-//   int ret = 0;
-//   struct signature_t *signature = (struct signature_t*)signature_arg;
+int verify_enclave(struct signature_t* signature, void* hash, void* pubkey)
+{
+  int ret = 0;
 
-//   ret = sm2_verify((void*)SM_PUB_KEY, hash, (void*)(signature->r), (void*)(signature->s));
+  ret = sm2_verify(pubkey, hash, (void*)(signature->r), (void*)(signature->s));
 
-//   return ret;
-// }
+  return ret;
+}
