@@ -28,7 +28,6 @@ typedef unsigned long pt_entry_t;
 #define ENCLAVE_UNTRUSTED_PAGE PTE_D | PTE_A | PTE_R | PTE_W | PTE_U
 #define ENCLAVE_KBUFFER_PAGE PTE_D | PTE_A | PTE_R | PTE_W | PTE_U
 
-
 /* Free memory list in-enclave */
 struct free_mem_page
 {
@@ -68,6 +67,5 @@ vaddr_t enclave_alloc_page(enclave_mem_t* enclave_mem, vaddr_t vaddr, unsigned l
 void enclave_mem_int(enclave_mem_t* enclave_mem, vaddr_t vaddr, int size, paddr_t paddr);
 int enclave_mem_destroy(enclave_mem_t * enclave_mem);
 vaddr_t map_va2pa(enclave_mem_t* enclave_mem, vaddr_t vaddr, paddr_t paddr, unsigned long flags);
-
 
 #endif

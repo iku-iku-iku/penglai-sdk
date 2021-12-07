@@ -262,3 +262,40 @@ int map_kbuffer(enclave_mem_t* enclave_mem, vaddr_t vaddr, paddr_t paddr, unsign
 	}
 	return 0;
 }
+
+int alloc_umem(unsigned long untrusted_mem_size, unsigned long* untrusted_mem_ptr, vaddr_t vaddr, enclave_mem_t* enclave_mem)
+{
+	int ret = 0;
+	char* addr = (char*)malloc(untrusted_mem_size + RISCV_PGSIZE);
+	if(!addr)
+	{
+		printf("SIGN_TOOL: can not alloc untrusted mem \n");
+		return -1;
+	}
+
+    vaddr_t page_addr = (vaddr_t)PAGE_UP((unsigned long)addr);
+    memset((void*)page_addr, 0, untrusted_mem_size);
+	*untrusted_mem_ptr = page_addr;
+	map_untrusted_mem(enclave_mem, vaddr, page_addr, untrusted_mem_size);
+
+	return ret;
+}
+
+int alloc_kbuffer(unsigned long kbuffer_size, unsigned long* kbuffer_ptr, vaddr_t vaddr, enclave_mem_t* enclave_mem)
+{
+	int ret = 0;
+    kbuffer_size = 0x1 << (ilog2(kbuffer_size - 1) + 1);
+    char* addr = (char*)malloc(kbuffer_size + RISCV_PGSIZE);
+	if(!addr)
+	{
+		printf("SIGN_TOOL: can not alloc untrusted mem \n");
+		return -1;
+	}
+
+    vaddr_t page_addr = (vaddr_t)PAGE_UP((unsigned long)addr);
+    memset((void*)page_addr, 0, kbuffer_size);
+	*kbuffer_ptr = page_addr;
+	map_kbuffer(enclave_mem, vaddr, page_addr, kbuffer_size);
+
+	return ret;
+}

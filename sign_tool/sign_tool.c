@@ -1,6 +1,5 @@
 #include <stdio.h>
 #include <stdlib.h>
-// #include <linux/log2.h> linux/log2.h: No such file or directory
 #include "math.h"
 #include "penglai-enclave.h"
 #include "param.h"
@@ -8,10 +7,8 @@
 #include "attest.h"
 #include "riscv64.h"
 #include "util.h"
-#include <openssl/ec.h>
-#include <openssl/pem.h>
 #include <assert.h>
-#include "gm/sm2.h"
+#include "parse_key_file.h"
 
 #define DEFAULT_CLOCK_DELAY 100000
 #define STACK_POINT 0x0000004000000000
@@ -58,41 +55,20 @@ unsigned int total_enclave_page(int elf_size, int stack_size)
 	return total_pages;
 }
 
-int alloc_umem(unsigned long untrusted_mem_size, unsigned long* untrusted_mem_ptr, enclave_mem_t* enclave_mem)
-{
-	int ret = 0;
-	char* addr = (char*)malloc(untrusted_mem_size + RISCV_PGSIZE);
-	if(!addr)
-	{
-		printf("SIGN_TOOL: can not alloc untrusted mem \n");
-		return -1;
-	}
-
-    vaddr_t page_addr = (vaddr_t)PAGE_UP((unsigned long)addr);
-    memset((void*)page_addr, 0, untrusted_mem_size);
-	*untrusted_mem_ptr = page_addr;
-	map_untrusted_mem(enclave_mem, DEFAULT_UNTRUSTED_PTR, page_addr, untrusted_mem_size);
-
-	return ret;
-}
-
-int alloc_kbuffer(unsigned long kbuffer_size, unsigned long* kbuffer_ptr, enclave_mem_t* enclave_mem)
-{
-	int ret = 0;
-    kbuffer_size = 0x1 << (ilog2(kbuffer_size - 1) + 1);
-    char* addr = (char*)malloc(kbuffer_size + RISCV_PGSIZE);
-	if(!addr)
-	{
-		printf("SIGN_TOOL: can not alloc untrusted mem \n");
-		return -1;
-	}
-
-    vaddr_t page_addr = (vaddr_t)PAGE_UP((unsigned long)addr);
-    memset((void*)page_addr, 0, kbuffer_size);
-	*kbuffer_ptr = page_addr;
-	map_kbuffer(enclave_mem, ENCLAVE_DEFAULT_KBUFFER, page_addr, kbuffer_size);
-
-	return ret;
+void init_enclave_user_param(struct penglai_enclave_user_param* user_param, struct elf_args* enclaveFile){
+    struct enclave_args* params = malloc(sizeof(struct enclave_args));
+    enclave_param_init(params);
+    params->untrusted_mem_size = DEFAULT_UNTRUSTED_SIZE;
+    params->untrusted_mem_ptr = 0;
+    user_param->elf_ptr = (unsigned long)enclaveFile->ptr;
+    user_param->elf_size = enclaveFile->size;
+    user_param->stack_size = params->stack_size;
+    user_param->untrusted_mem_ptr = params->untrusted_mem_ptr;
+    user_param->untrusted_mem_size = params->untrusted_mem_size;
+    user_param->ocall_buf_size = 0;
+    user_param->resume_type = 0;
+    free(params);
+    return;
 }
 
 int penglai_enclave_create(struct penglai_enclave_user_param* enclave_param, enclave_css_t* enclave_css, unsigned long* meta_offset_arg)
@@ -104,7 +80,7 @@ int penglai_enclave_create(struct penglai_enclave_user_param* enclave_param, enc
 		printf("SIGN_TOOL: calculate elf_size failed\n");
 		return -1;
 	}
-	printf("[penglai_enclave_create] elf size: %d\n", elf_size);
+	printf("[load_enclave] elf size: %d\n", elf_size);
 	
     long stack_size = enclave_param->stack_size;
 	long untrusted_mem_size = enclave_param->untrusted_mem_size;
@@ -119,7 +95,7 @@ int penglai_enclave_create(struct penglai_enclave_user_param* enclave_param, enc
         printf("SIGN_TOOL: eapp memory is out of bound \n");
 		return -1;
     }
-    printf("[penglai_enclave_create] total_pages: %d\n", total_pages);
+    printf("[load_enclave] total_pages: %d\n", total_pages);
 	
     enclave_mem_t* enclave_mem = malloc(sizeof(enclave_mem_t));
     int size = total_pages * RISCV_PGSIZE;
@@ -147,18 +123,14 @@ int penglai_enclave_create(struct penglai_enclave_user_param* enclave_param, enc
     untrusted_mem_size = 0x1 << (ilog2(untrusted_mem_size - 1) + 1);
 	if((untrusted_mem_ptr == 0) && (untrusted_mem_size > 0))
 	{
-		alloc_umem(untrusted_mem_size, &untrusted_mem_ptr, enclave_mem);
+		alloc_umem(untrusted_mem_size, &untrusted_mem_ptr, DEFAULT_UNTRUSTED_PTR, enclave_mem);
 	}
-	alloc_kbuffer(ENCLAVE_DEFAULT_KBUFFER_SIZE, &kbuffer_ptr, enclave_mem);
+	alloc_kbuffer(ENCLAVE_DEFAULT_KBUFFER_SIZE, &kbuffer_ptr, ENCLAVE_DEFAULT_KBUFFER, enclave_mem);
 
     unsigned char enclave_hash[HASH_SIZE];
-    unsigned char output_hash[HASH_SIZE];
-    // uintptr_t nonce = 12345;
     hash_enclave(elf_entry, enclave_mem, (void*)enclave_hash, 0);
-	// update_enclave_hash((char *)output_hash, (char *)enclave_hash, nonce);
-    printf("[penglai_enclave_create] hash with nonce: \n");
+    printf("[load_enclave] hash with nonce: \n");
     printHex(enclave_hash, HASH_SIZE);
-    // printHex(output_hash, HASH_SIZE);
     
 	memcpy(enclave_css->enclave_hash, enclave_hash, HASH_SIZE);
 	*meta_offset_arg = meta_offset;
@@ -167,50 +139,63 @@ int penglai_enclave_create(struct penglai_enclave_user_param* enclave_param, enc
     return 0;
 }
 
-int update_metadata(const char *path, const enclave_css_t *enclave_css, uint64_t meta_offset)
+/* load enclave to 
+    (1) parse elf file to get the .note.penglaimeta section offset
+    (2) load elf to memory and calculate the enclave_hash, which will be saved in enclave_css 
+*/
+int load_enclave(const char *eappfile, enclave_css_t *enclave_css, unsigned long *meta_offset)
 {
-    if(path == NULL || enclave_css == NULL){
-		printf("SIGN_TOOL: can not alloc untrusted mem \n");
-		return -1;
-	};
-
-	FILE *fd = fopen(path, "rb+");
-	if(fd == NULL){
-		printf("open file failed\n");
-		return -1;
-	}
-	fseek(fd, meta_offset, 0);
-	int count = fwrite(enclave_css, sizeof(enclave_css_t),1, fd);
-    fclose(fd);
-	if(count != 1){
-		printf("write byte number is wrong: num: %d\n", count);
-		return -1;
-	}
-	
-	return 0;
+    int ret = 0;
+    struct elf_args* enclaveFile;
+    struct penglai_enclave_user_param* user_param;
+    enclaveFile = malloc(sizeof(struct elf_args));
+    elf_args_init(enclaveFile, eappfile);
+    if(!elf_valid(enclaveFile))
+    {
+        printf("error when initializing enclaveFile\n");
+        ret = -1;
+        goto out;
+    }
+    user_param = malloc(sizeof(struct penglai_enclave_user_param));
+    init_enclave_user_param(user_param, enclaveFile);
+    penglai_enclave_create(user_param, enclave_css, meta_offset);
+out:
+    elf_args_destroy(enclaveFile);
+    free(user_param);
+    free(enclaveFile);
+    return ret;
 }
 
-int read_metadata(const char *path, enclave_css_t *enclave_css, uint64_t meta_offset)
+int update_metadata(const char *eappfile, const enclave_css_t *enclave_css, uint64_t meta_offset)
 {
-    if(path == NULL || enclave_css == NULL){
-		printf("SIGN_TOOL: can not alloc untrusted mem \n");
+    if(eappfile == NULL || enclave_css == NULL || meta_offset < 0){
+		printf("ERROR: invalid params\n");
 		return -1;
 	};
+    return write_data_to_file(eappfile, "rb+", (unsigned char *)enclave_css, sizeof(enclave_css_t), meta_offset);
+}
 
-	FILE *fd = fopen(path, "rb");
-	if(fd == NULL){
-		printf("open file failed\n");
+int read_metadata(const char *eappfile, enclave_css_t *enclave_css, uint64_t meta_offset)
+{
+    if(eappfile == NULL || enclave_css == NULL || meta_offset < 0){
+		printf("ERROR: invalid params\n");
 		return -1;
-	}
-	fseek(fd, meta_offset, 0);
-	int count = fread(enclave_css, sizeof(enclave_css_t), 1, fd);
-    fclose(fd);
-	if(count != 1){
-		printf("read byte number is wrong: num: %d\n", count);
-		return -1;
-	}
-	
-	return 0;
+	};
+    return read_file_to_buf(eappfile, (unsigned char *)enclave_css, sizeof(enclave_css_t), meta_offset);
+}
+
+int dump_enclave_metadata(const char *eappfile, const char *dumpfile)
+{
+    enclave_css_t enclave_css;
+    unsigned long meta_offset;
+    int ret = 0;
+
+    load_enclave(eappfile, &enclave_css, &meta_offset);
+
+    memset(&enclave_css, 0, sizeof(enclave_css_t));
+    read_metadata(eappfile, &enclave_css, meta_offset);
+    ret = write_data_to_file(dumpfile, "wb", (unsigned char *)&enclave_css, sizeof(enclave_css_t), 0);
+    return ret;
 }
 
 static bool cmdline_parse(unsigned int argc, char *argv[], int *mode, const char **path)
@@ -355,265 +340,117 @@ static bool cmdline_parse(unsigned int argc, char *argv[], int *mode, const char
     return true;
 }
 
-void generate_key_pair(char* pub_key, char* priv_key){
-    EC_KEY *ec_key = EC_KEY_new_by_curve_name(NID_sm2);
-    assert(1==EC_KEY_generate_key(ec_key));
-    assert(1==EC_KEY_check_key(ec_key));
-
-    BIO * bio = BIO_new_fp(stdout,0);
-    assert(1==EC_KEY_print(bio, ec_key, 0));
-    BIO_free(bio);
-
-    {
-        FILE * f = fopen(pub_key,"w");
-        PEM_write_EC_PUBKEY(f, ec_key);
-        //PEM_write_bio_EC_PUBKEY(bio, ec_key);
-        fclose(f);
-    }
-
-    {
-        FILE * f = fopen(priv_key,"w");
-        PEM_write_ECPrivateKey(f,ec_key, NULL,NULL,0,NULL,NULL);
-        //PEM_write_bio_ECPrivateKey(bio,ec_key, NULL,NULL,0,NULL,NULL);
-        fclose(f);
-    }
-
-    EC_KEY_free(ec_key);
-
-    // BIO * bio_out = BIO_new_fp(stdout,0);
-    // EVP_PKEY *key = NULL;
-    // OSSL_PARAM params[2];
-    // EVP_PKEY_CTX *gctx =
-    //     EVP_PKEY_CTX_new_from_name(NULL, "EC", NULL);
-
-    // EVP_PKEY_keygen_init(gctx);
-
-    // params[0] = OSSL_PARAM_construct_utf8_string("group", "SM2", 0);
-    // params[1] = OSSL_PARAM_construct_end();
-    // EVP_PKEY_CTX_set_params(gctx, params);
-
-    // EVP_PKEY_generate(gctx, &key);
-
-    // EVP_PKEY_print_private(bio_out, key, 0, NULL);
-
-    // EVP_PKEY_free(key);
-    // EVP_PKEY_CTX_free(gctx);
-}
-
-void get_key_pair(char* pub_key, char* priv_key){
-    printf("\nread pri key:\n");
-    FILE * f = fopen(priv_key, "r");
-    EC_KEY *ec_key = PEM_read_ECPrivateKey(f,NULL,NULL,NULL);
-    fclose(f);
-    assert(1==EC_KEY_check_key(ec_key));
-    BIO * bio = BIO_new_fp(stdout,0);
-    EC_KEY_print(bio, ec_key, 0);
-    EC_KEY_free(ec_key);
-
-    // printf("read pub key:\n");
-    // f = fopen(pub_key, "r");
-    // ec_key = PEM_read_EC_PUBKEY(f, NULL, NULL, NULL);
-    // fclose(f);
-    // EC_KEY_print(bio, ec_key, 0);
-    // EC_KEY_free(ec_key);
-}
-
-void parse_pri_key_file(char* priv_key){
-    printf("\nread pri key file:\n");
-    FILE * f = fopen(priv_key, "r");
-    EC_KEY *ec_key = PEM_read_ECPrivateKey(f,NULL,NULL,NULL);
-    fclose(f);
-    assert(1==EC_KEY_check_key(ec_key));
-
-    BIO * bio = BIO_new(BIO_s_mem());
-    EC_KEY_print(bio, ec_key, 0);
-    EC_KEY_free(ec_key);
-
-    char *line;
-    line = (char*)malloc(1024);
-    BIO_get_line(bio, line, 1024);
-    printf("line 1:\n");
-    printf("%s", line);
-
-    memset(line, 0, 1024);
-    BIO_get_line(bio, line, 1024);
-    printf("line 2:\n");
-    printf("%s", line);
-    free(line);
-
-    printf("calcu:\n");
-    unsigned char *pri = (unsigned char*)malloc(32);
-    long num = BIO_get_mem_data(bio, &line);
-    unsigned char b = 0;
-    int cur = 0;
-    int high_bit = 1;
-    int number = 0;
-    char byte;
-    for(int i = 0; i < num; i++){
-        if(cur == 32){
-            printf("ERROR: cur = 32\n");
-            break;
-        }
-        if(line[i] == ' ' || line[i] == '\n' || line[i] == ':'){
-            if(b != 0){
-                pri[cur++] = b;
-                b = 0;
-            }
-            continue;
-        }
-        number = 0;
-        byte = line[i];
-        if(byte >= '0' && byte <= '9'){
-            number = byte - '0';
-        } else if(byte >= 'a' && byte <= 'f'){
-            number = byte - 'a' + 10;
-        }
-        if(high_bit){
-            b += number * 16;
-            high_bit = 0;
-        } else{
-            b += number;
-            high_bit = 1;
-        }
-    }
-    printHex(pri, 32);
-    unsigned char *pub = (unsigned char*)malloc(PUBLIC_KEY_SIZE);
-    sm2_make_pubkey(pri, (ecc_point *)pub);
-    printf("pub key: \n");
-    printHex(pub, PUBLIC_KEY_SIZE);
-}
-
 int main(int argc, char* argv[])
 {
-    printf("hello world\n");
+    printf("Welcome to PENGLAI sign_tool!\n");
 
-	// const char *path[8] = {NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL};
-	// int res = -1, mode = -1;
-	// //Parse command line
-    // if(cmdline_parse(argc, argv, &mode, path) == false)
-    // {
-    //     printf(USAGE_STRING);
-    //     goto clear_return;
-    // }
-    // if(mode == -1) // User only wants to get the help info
-    // {
-    //     res = 0;
-    //     goto clear_return;
-    // }
-	// else if(mode == DUMP)
-    // {
-    //     // dump metadata info
-    //     if(dump_enclave_metadata(path[ELF], path[DUMPFILE]) == false)
-    //     {
-    //         printf("Failed to dump metadata info to file \"%s\".\n.", path[DUMPFILE]);
-    //         goto clear_return;
-    //     }
-    //     printf("Succeed.\n");
-    //     res = 0;
-    //     goto clear_return;
-    // }
-
-	// if(mode == SIGN)
-	// {
-
-	// }
-
-	// //Other modes
-	// if(parse_key_file(mode, path[KEY], &rsa, &key_type) == false && key_type != NO_KEY)
-    // {
-    //     goto clear_return;
-    // }
-
-    generate_key_pair("pub_key.pem", "pri_key.pem");
-    get_key_pair("pub_key.pem", "pri_key.pem");
-
-    parse_pri_key_file("pri_key.pem");
-    char *msg = "Helloworld shangqy\n";
-
-
-    return 0;
-
-	if(argc <= 1)
+	const char *path[8] = {NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL};
+	int res = -1, mode = -1;
+	//Parse command line
+    if(cmdline_parse(argc, argv, &mode, path) == false)
     {
-        printf("Please input the enclave ELF file name\n");
+        printf(USAGE_STRING);
+        goto clear_return;
     }
-    struct elf_args* enclaveFile = malloc(sizeof(struct elf_args));
-    char * eappfile = argv[1];
-
-	printf("sign file: %s\n", eappfile);
-    elf_args_init(enclaveFile, eappfile);
-    if(!elf_valid(enclaveFile))
+    if(mode == -1) // User only wants to get the help info
     {
-        printf("error when initializing enclaveFile\n");
-        goto out;
+        res = 0;
+        goto clear_return;
     }
-    struct PLenclave* enclave = malloc(sizeof(struct PLenclave)); 
-    struct enclave_args* params = malloc(sizeof(struct enclave_args)); 
-    PLenclave_init(enclave);
-    enclave_param_init(params);
-    params->untrusted_mem_size = DEFAULT_UNTRUSTED_SIZE;
-    params->untrusted_mem_ptr = 0;
-    // if(PLenclave_create(enclave, enclaveFile, params) < 0 )
-    // {
-    //     printf("host:%d: failed to create enclave\n");
-    //     pthread_exit((void*)0);
-    // }
-    enclave->user_param.elf_ptr = (unsigned long)enclaveFile->ptr;
-    enclave->user_param.elf_size = enclaveFile->size;
-    enclave->user_param.stack_size = params->stack_size;
-    enclave->user_param.untrusted_mem_ptr = params->untrusted_mem_ptr;
-    enclave->user_param.untrusted_mem_size = params->untrusted_mem_size;
-    enclave->user_param.ocall_buf_size = 0;
-    enclave->user_param.resume_type = 0;
+	else if(mode == DUMP)
+    {
+        // dump metadata info
+        if(dump_enclave_metadata(path[ELF], path[DUMPFILE]) == false)
+        {
+            printf("Failed to dump metadata info to file \"%s\".\n.", path[DUMPFILE]);
+            goto clear_return;
+        }
+        printf("Succeed.\n");
+        res = 0;
+        goto clear_return;
+    }
+    else if(mode == SIGN)
+	{
+        printf("SIGN enclave: %s, keyfile: %s, output: %s, dumpfile(optional): %s\n", 
+            path[ELF], path[KEY], path[OUTPUT], (path[DUMPFILE] ? path[DUMPFILE] : "--"));
+        // load elf
+        enclave_css_t enclave_css;
+        unsigned long meta_offset;
+        if(load_enclave(path[ELF], &enclave_css, &meta_offset) < 0){
+            printf("ERROR: load enclave failed!\n");
+        }
 
-	enclave_css_t enclave_css;
-	unsigned long meta_offset;
-    penglai_enclave_create(&enclave->user_param, &enclave_css, &meta_offset);
-	elf_args_destroy(enclaveFile);
+        // parse private key, sign and verify
+        unsigned char *private_key = (unsigned char *)malloc(PRIVATE_KEY_SIZE);
+        parse_priv_key_file(path[KEY], private_key, enclave_css.user_pub_key);
+        sign_enclave((struct signature_t *)(enclave_css.signature), enclave_css.enclave_hash, private_key);
+        int ret = verify_enclave((struct signature_t *)(enclave_css.signature), enclave_css.enclave_hash, enclave_css.user_pub_key);
+        if(ret != 0){
+            printf("ERROR: verify enclave_css struct failed!\n");
+        }
+        // printf("[load_enclave] signature: \n");
+        // printHex(enclave_css.signature, SIGNATURE_SIZE);
+        // printf("[load_enclave] private_key: \n");
+        // printHex(private_key, PRIVATE_KEY_SIZE);
+        // printf("[load_enclave] public_key: \n");
+        // printHex(enclave_css.user_pub_key, PUBLIC_KEY_SIZE);
 
-	// printf("[penglai_enclave_create] old zero metadata:\n");
-	// printf("meta offset: %d\n", meta_offset);
-	enclave_css_t new_css;
-	// memset(&new_css, 0, sizeof(enclave_css_t));
-	// read_metadata(eappfile, &new_css, meta_offset);
-	// printf("[penglai_enclave_create] new signature: \n");
-    // printHex(new_css.signature, SIGNATURE_SIZE);
-	// printf("[penglai_enclave_create] new public_key: \n\n\n");
-    // printHex(new_css.user_pub_key, PUBLIC_KEY_SIZE);
+        // generate out
+        copy_file(path[ELF], path[OUTPUT]);
+        update_metadata(path[OUTPUT], &enclave_css, meta_offset);
 
-	unsigned char private_key[PRIVATE_KEY_SIZE];
-	parse_key_file(private_key, enclave_css.user_pub_key);
-	sign_enclave((struct signature_t *)(enclave_css.signature), enclave_css.enclave_hash, private_key);
-	printf("[penglai_enclave_create] signature: \n");
-    printHex(enclave_css.signature, SIGNATURE_SIZE);
-	// printf("[penglai_enclave_create] private_key: \n");
-    // printHex(private_key, PRIVATE_KEY_SIZE);
-	printf("[penglai_enclave_create] public_key: \n");
-    printHex(enclave_css.user_pub_key, PUBLIC_KEY_SIZE);
-	int ret = verify_enclave((struct signature_t *)(enclave_css.signature), enclave_css.enclave_hash, enclave_css.user_pub_key);
-	if(ret != 0){
-		printf("ERROR: verify enclave_css struct failed!\n");
+        //dump
+        if(path[DUMPFILE] != NULL && dump_enclave_metadata(path[OUTPUT], path[DUMPFILE]) == false)
+        {
+            printf("Failed to dump metadata info to file \"%s\".\n.", path[DUMPFILE]);
+            goto clear_return;
+        }
 	}
-	// update_metadata("prime_signed", &enclave_css, 0);
-	update_metadata(eappfile, &enclave_css, meta_offset);
-
-	printf("\n\n\n[penglai_enclave_create] new zero metadata:\n");
-	printf("meta offset: %d\n", meta_offset);
-	memset(&new_css, 0, sizeof(enclave_css_t));
-	// read_metadata("prime_signed", &new_css, 0);
-	read_metadata(eappfile, &new_css, meta_offset);
-	printf("[penglai_enclave_create] new signature: \n");
-    printHex(new_css.signature, SIGNATURE_SIZE);
-	printf("[penglai_enclave_create] new public_key: \n");
-    printHex(new_css.user_pub_key, PUBLIC_KEY_SIZE);
-
-    printf("end\n");
-    free(enclave);
-    free(params);
+    else if(mode == GENDATA)
+    {
+        printf("GENDATA enclave: %s, output: %s, \n", path[ELF], path[OUTPUT]);
+        // load elf
+        enclave_css_t enclave_css;
+        unsigned long meta_offset;
+        if(load_enclave(path[ELF], &enclave_css, &meta_offset) < 0){
+            printf("ERROR: load enclave failed!\n");
+        }
+        // output enclave hash
+        write_data_to_file(path[OUTPUT], "wb", enclave_css.enclave_hash, HASH_SIZE, 0);
+    }
+    else if(mode == CATSIG)
+    {
+        printf("CATSIG enclave: %s, keyfile: %s, output: %s, signatrue: %s, unsigned hash: %s, dumpfile(optional): %s\n", 
+            path[ELF], path[KEY], path[OUTPUT], path[SIG], path[UNSIGNED], (path[DUMPFILE] ? path[DUMPFILE] : "--"));
+        // load enclave, calcu enclave hash
+        enclave_css_t enclave_css;
+        unsigned long meta_offset;
+        if(load_enclave(path[ELF], &enclave_css, &meta_offset) < 0){
+            printf("ERROR: load enclave failed!\n");
+        }
+        // parse public key, verify signature
+        unsigned char *public_key = (unsigned char *)malloc(PUBLIC_KEY_SIZE);
+        parse_pub_key_file(path[KEY], public_key);
+        unsigned char *signature = (unsigned char *)malloc(SIGNATURE_SIZE);
+        read_file_to_buf(path[UNSIGNED], signature, SIGNATURE_SIZE, 0);
+        int ret = verify_enclave((struct signature_t *)signature, enclave_css.enclave_hash, public_key);
+        if(ret != 0){
+            printf("ERROR: verify signature failed!\n");
+        }
+        // append signature to eappfile
+        copy_file(path[ELF], path[OUTPUT]);
+        memcpy(enclave_css.signature, signature, SIGNATURE_SIZE);
+        memcpy(enclave_css.user_pub_key, public_key, PUBLIC_KEY_SIZE);
+        update_metadata(path[OUTPUT], &enclave_css, meta_offset);
+        //dump
+        if(path[DUMPFILE] != NULL && dump_enclave_metadata(path[OUTPUT], path[DUMPFILE]) == false)
+        {
+            printf("Failed to dump metadata info to file \"%s\".\n.", path[DUMPFILE]);
+            goto clear_return;
+        }
+    }
+    printf("Succeed.\n");
 
 clear_return:
-out:
-    elf_args_destroy(enclaveFile);
-    free(enclaveFile);
     return 0;
 }

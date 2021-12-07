@@ -16,15 +16,8 @@ int penglai_enclave_eapp_preprare(
 
 int penglai_enclave_elfmemsize(void* elf_ptr, int* size);
 
-int map_untrusted_mem(
-		enclave_mem_t* enclave_mem, 
-		vaddr_t vaddr, 
-		paddr_t paddr, 
-		unsigned long size);
+int alloc_umem(unsigned long untrusted_mem_size, unsigned long* untrusted_mem_ptr, vaddr_t vaddr, enclave_mem_t* enclave_mem);
 
-int map_kbuffer(
-		enclave_mem_t* enclave_mem,
-		vaddr_t vaddr,
-		paddr_t paddr,
-		unsigned long size);
+int alloc_kbuffer(unsigned long kbuffer_size, unsigned long* kbuffer_ptr, vaddr_t vaddr, enclave_mem_t* enclave_mem);
+
 #endif
