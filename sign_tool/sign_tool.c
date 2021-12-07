@@ -7,6 +7,11 @@
 #include "penglai-enclave-elfloader.h"
 #include "attest.h"
 #include "riscv64.h"
+#include "util.h"
+#include <openssl/ec.h>
+#include <openssl/pem.h>
+#include <assert.h>
+#include "gm/sm2.h"
 
 #define DEFAULT_CLOCK_DELAY 100000
 #define STACK_POINT 0x0000004000000000
@@ -20,6 +25,16 @@
 
 #define PAGE_UP(addr)	(((addr)+((RISCV_PGSIZE)-1))&(~((RISCV_PGSIZE)-1)))
 #define PAGE_DOWN(addr)	((addr)&(~((RISCV_PGSIZE)-1)))
+
+typedef enum _file_path_t
+{
+    ELF = 0,
+    KEY = 1,
+    OUTPUT,
+    SIG,
+    UNSIGNED,
+    DUMPFILE
+} file_path_t;
 
 void printHex(unsigned char *c, int n)
 {
@@ -49,7 +64,7 @@ int alloc_umem(unsigned long untrusted_mem_size, unsigned long* untrusted_mem_pt
 	char* addr = (char*)malloc(untrusted_mem_size + RISCV_PGSIZE);
 	if(!addr)
 	{
-		printf("KERNEL MODULE: can not alloc untrusted mem \n");
+		printf("SIGN_TOOL: can not alloc untrusted mem \n");
 		return -1;
 	}
 
@@ -68,7 +83,7 @@ int alloc_kbuffer(unsigned long kbuffer_size, unsigned long* kbuffer_ptr, enclav
     char* addr = (char*)malloc(kbuffer_size + RISCV_PGSIZE);
 	if(!addr)
 	{
-		printf("KERNEL MODULE: can not alloc untrusted mem \n");
+		printf("SIGN_TOOL: can not alloc untrusted mem \n");
 		return -1;
 	}
 
@@ -86,7 +101,7 @@ int penglai_enclave_create(struct penglai_enclave_user_param* enclave_param, enc
 	int elf_size = 0;
 	if(penglai_enclave_elfmemsize(elf_ptr, &elf_size) < 0)
 	{
-		printf("KERNEL MODULE: calculate elf_size failed\n");
+		printf("SIGN_TOOL: calculate elf_size failed\n");
 		return -1;
 	}
 	printf("[penglai_enclave_create] elf size: %d\n", elf_size);
@@ -101,7 +116,7 @@ int penglai_enclave_create(struct penglai_enclave_user_param* enclave_param, enc
 
 	total_pages = 0x1 << order;
 	if((elf_size > MAX_ELF_SIZE) || (stack_size > MAX_STACK_SIZE) || (untrusted_mem_size > MAX_UNTRUSTED_MEM_SIZE)){
-        printf("KERNEL MODULE: eapp memory is out of bound \n");
+        printf("SIGN_TOOL: eapp memory is out of bound \n");
 		return -1;
     }
     printf("[penglai_enclave_create] total_pages: %d\n", total_pages);
@@ -111,7 +126,7 @@ int penglai_enclave_create(struct penglai_enclave_user_param* enclave_param, enc
     char* addr = (char*)malloc(size + RISCV_PGSIZE);
     if(!addr)
 	{
-		printf("KERNEL MODULE: can not alloc untrusted mem \n");
+		printf("SIGN_TOOL: can not alloc untrusted mem \n");
 		return -1;
 	}
     vaddr_t page_addr = (vaddr_t)PAGE_UP((unsigned long)addr);
@@ -122,11 +137,11 @@ int penglai_enclave_create(struct penglai_enclave_user_param* enclave_param, enc
 	if(penglai_enclave_eapp_preprare(enclave_mem, elf_ptr, elf_size,
 				&elf_entry, STACK_POINT, stack_size, &meta_offset, &meta_blocksize))
 	{
-		printf("KERNEL MODULE: penglai_enclave_eapp_preprare is failed\n");
+		printf("SIGN_TOOL: penglai_enclave_eapp_preprare is failed\n");
 	}
 	if(elf_entry == 0)
 	{
-		printf("KERNEL MODULE: elf_entry reset is failed \n");
+		printf("SIGN_TOOL: elf_entry reset is failed \n");
 	}
 
     untrusted_mem_size = 0x1 << (ilog2(untrusted_mem_size - 1) + 1);
@@ -155,7 +170,7 @@ int penglai_enclave_create(struct penglai_enclave_user_param* enclave_param, enc
 int update_metadata(const char *path, const enclave_css_t *enclave_css, uint64_t meta_offset)
 {
     if(path == NULL || enclave_css == NULL){
-		printf("KERNEL MODULE: can not alloc untrusted mem \n");
+		printf("SIGN_TOOL: can not alloc untrusted mem \n");
 		return -1;
 	};
 
@@ -178,7 +193,7 @@ int update_metadata(const char *path, const enclave_css_t *enclave_css, uint64_t
 int read_metadata(const char *path, enclave_css_t *enclave_css, uint64_t meta_offset)
 {
     if(path == NULL || enclave_css == NULL){
-		printf("KERNEL MODULE: can not alloc untrusted mem \n");
+		printf("SIGN_TOOL: can not alloc untrusted mem \n");
 		return -1;
 	};
 
@@ -198,16 +213,333 @@ int read_metadata(const char *path, enclave_css_t *enclave_css, uint64_t meta_of
 	return 0;
 }
 
+static bool cmdline_parse(unsigned int argc, char *argv[], int *mode, const char **path)
+{
+    assert(mode!=NULL && path != NULL);
+    if(argc<2)
+    {
+        printf("SIGN_TOOL: Lack of parameters.\n");
+        return false;
+    }
+    if(argc == 2 && !strcmp(argv[1], "-help"))
+    {
+         printf(USAGE_STRING);
+         *mode = -1;
+         return true;
+    }
+    
+    enum { PAR_REQUIRED, PAR_OPTIONAL, PAR_INVALID };
+    typedef struct _param_struct_{
+        const char *name;          //options
+        char *value;               //keep the path
+        int flag;                  //indicate this parameter is required(0), optional(1) or invalid(2)
+    }param_struct_t;               //keep the parameter pairs
+
+    param_struct_t params_sign[] = {
+        {"-enclave", NULL, PAR_REQUIRED},
+        {"-key", NULL, PAR_REQUIRED},
+        {"-out", NULL, PAR_REQUIRED},
+        {"-sig", NULL, PAR_INVALID},
+        {"-unsigned", NULL, PAR_INVALID},
+        {"-dumpfile", NULL, PAR_OPTIONAL}};
+    param_struct_t params_gendata[] = {
+        {"-enclave", NULL, PAR_REQUIRED},
+        {"-key", NULL, PAR_INVALID},
+        {"-out", NULL, PAR_REQUIRED},
+        {"-sig", NULL, PAR_INVALID},
+        {"-unsigned", NULL, PAR_INVALID},
+        {"-dumpfile", NULL, PAR_INVALID}};
+    param_struct_t params_catsig[] = {
+        {"-enclave", NULL, PAR_REQUIRED},
+        {"-key", NULL, PAR_REQUIRED},
+        {"-out", NULL, PAR_REQUIRED},
+        {"-sig", NULL, PAR_REQUIRED},
+        {"-unsigned", NULL, PAR_REQUIRED},
+        {"-dumpfile", NULL, PAR_OPTIONAL}};
+    param_struct_t params_dump[] = {
+        {"-enclave", NULL, PAR_REQUIRED},
+        {"-key", NULL, PAR_INVALID},
+        {"-out", NULL, PAR_INVALID},
+        {"-sig", NULL, PAR_INVALID},
+        {"-unsigned", NULL, PAR_INVALID},
+        {"-dumpfile", NULL, PAR_REQUIRED}};
+
+    const char *mode_m[] ={"sign", "gendata","catsig", "dump"};
+    param_struct_t *params[] = {params_sign, params_gendata, params_catsig, params_dump};
+    
+	unsigned int tempidx=0;
+    for(; tempidx<sizeof(mode_m)/sizeof(mode_m[0]); tempidx++)
+    {
+        if(!strcmp(mode_m[tempidx], argv[1]))//match
+        {
+            break;
+        }
+    }
+    unsigned int tempmode = tempidx;
+    if(tempmode>=sizeof(mode_m)/sizeof(mode_m[0]))
+    {
+        printf("Cannot recognize the command \"%s\".\nCommand \"sign/gendata/catsig\" is required.\n", argv[1]);
+        return false;
+    }
+
+    unsigned int params_count = (unsigned)(sizeof(params_sign)/sizeof(params_sign[0]));
+    for(unsigned int i=2; i<argc; i++)
+    {
+        unsigned int idx = 0;
+        for(; idx<params_count; idx++)
+        {
+            if(strcmp(argv[i], params[tempmode][idx].name)==0) //match
+            {
+                if((i<argc-1)&&(strncmp(argv[i+1], "-", 1)))  // assuming pathname doesn't contain "-"
+                {
+                    if(params[tempmode][idx].value != NULL)
+                    {
+                        printf("Repeatly specified \"%s\" option.\n", params[tempmode][idx].name);
+                        return false;
+                    }
+                    params[tempmode][idx].value = argv[i+1];
+                    i++;
+                    break;
+                }
+                else     //didn't match: 1) no path parameter behind option parameter 2) parameters format error.
+                {
+                    printf("The File name is not correct for \"%s\" option.\n", params[tempmode][idx].name);
+                    return false;
+                }
+            }
+        }
+        if(idx == params_count)
+        {
+            printf("Cannot recognize the option \"%s\".\n", argv[i]);
+            return false;
+        }
+    }
+
+    for(unsigned int i = 0; i < params_count; i++)
+    {
+        if(params[tempmode][i].flag == PAR_REQUIRED && params[tempmode][i].value == NULL)
+        {
+            printf("Option \"%s\" is required for the command \"%s\".\n", params[tempmode][i].name, mode_m[tempmode]);
+            return false;
+        }
+        if(params[tempmode][i].flag == PAR_INVALID && params[tempmode][i].value != NULL)
+        {
+            printf("Option \"%s\" is invalid for the command \"%s\".\n", params[tempmode][i].name, mode_m[tempmode]);
+            return false;
+        }
+    }
+    
+    for(unsigned int i = 0; i < params_count-1; i++)
+    {
+        if(params[tempmode][i].value == NULL)
+            continue;
+        for(unsigned int j=i+1; j < params_count; j++)
+        {
+            if(params[tempmode][j].value == NULL)
+                continue;
+            if(strlen(params[tempmode][i].value) == strlen(params[tempmode][j].value) &&
+                !strncmp(params[tempmode][i].value, params[tempmode][j].value, strlen(params[tempmode][i].value)))
+            {
+                printf("Option \"%s\" and option \"%s\" are using the same file path.\n", params[tempmode][i].name, params[tempmode][j].name);
+                return false;
+            }
+        }
+    }
+    // Set output parameters
+    for(unsigned int i = 0; i < params_count; i++)
+    {
+        path[i] = params[tempmode][i].value;
+    }
+
+    *mode = tempmode;
+    return true;
+}
+
+void generate_key_pair(char* pub_key, char* priv_key){
+    EC_KEY *ec_key = EC_KEY_new_by_curve_name(NID_sm2);
+    assert(1==EC_KEY_generate_key(ec_key));
+    assert(1==EC_KEY_check_key(ec_key));
+
+    BIO * bio = BIO_new_fp(stdout,0);
+    assert(1==EC_KEY_print(bio, ec_key, 0));
+    BIO_free(bio);
+
+    {
+        FILE * f = fopen(pub_key,"w");
+        PEM_write_EC_PUBKEY(f, ec_key);
+        //PEM_write_bio_EC_PUBKEY(bio, ec_key);
+        fclose(f);
+    }
+
+    {
+        FILE * f = fopen(priv_key,"w");
+        PEM_write_ECPrivateKey(f,ec_key, NULL,NULL,0,NULL,NULL);
+        //PEM_write_bio_ECPrivateKey(bio,ec_key, NULL,NULL,0,NULL,NULL);
+        fclose(f);
+    }
+
+    EC_KEY_free(ec_key);
+
+    // BIO * bio_out = BIO_new_fp(stdout,0);
+    // EVP_PKEY *key = NULL;
+    // OSSL_PARAM params[2];
+    // EVP_PKEY_CTX *gctx =
+    //     EVP_PKEY_CTX_new_from_name(NULL, "EC", NULL);
+
+    // EVP_PKEY_keygen_init(gctx);
+
+    // params[0] = OSSL_PARAM_construct_utf8_string("group", "SM2", 0);
+    // params[1] = OSSL_PARAM_construct_end();
+    // EVP_PKEY_CTX_set_params(gctx, params);
+
+    // EVP_PKEY_generate(gctx, &key);
+
+    // EVP_PKEY_print_private(bio_out, key, 0, NULL);
+
+    // EVP_PKEY_free(key);
+    // EVP_PKEY_CTX_free(gctx);
+}
+
+void get_key_pair(char* pub_key, char* priv_key){
+    printf("\nread pri key:\n");
+    FILE * f = fopen(priv_key, "r");
+    EC_KEY *ec_key = PEM_read_ECPrivateKey(f,NULL,NULL,NULL);
+    fclose(f);
+    assert(1==EC_KEY_check_key(ec_key));
+    BIO * bio = BIO_new_fp(stdout,0);
+    EC_KEY_print(bio, ec_key, 0);
+    EC_KEY_free(ec_key);
+
+    // printf("read pub key:\n");
+    // f = fopen(pub_key, "r");
+    // ec_key = PEM_read_EC_PUBKEY(f, NULL, NULL, NULL);
+    // fclose(f);
+    // EC_KEY_print(bio, ec_key, 0);
+    // EC_KEY_free(ec_key);
+}
+
+void parse_pri_key_file(char* priv_key){
+    printf("\nread pri key file:\n");
+    FILE * f = fopen(priv_key, "r");
+    EC_KEY *ec_key = PEM_read_ECPrivateKey(f,NULL,NULL,NULL);
+    fclose(f);
+    assert(1==EC_KEY_check_key(ec_key));
+
+    BIO * bio = BIO_new(BIO_s_mem());
+    EC_KEY_print(bio, ec_key, 0);
+    EC_KEY_free(ec_key);
+
+    char *line;
+    line = (char*)malloc(1024);
+    BIO_get_line(bio, line, 1024);
+    printf("line 1:\n");
+    printf("%s", line);
+
+    memset(line, 0, 1024);
+    BIO_get_line(bio, line, 1024);
+    printf("line 2:\n");
+    printf("%s", line);
+    free(line);
+
+    printf("calcu:\n");
+    unsigned char *pri = (unsigned char*)malloc(32);
+    long num = BIO_get_mem_data(bio, &line);
+    unsigned char b = 0;
+    int cur = 0;
+    int high_bit = 1;
+    int number = 0;
+    char byte;
+    for(int i = 0; i < num; i++){
+        if(cur == 32){
+            printf("ERROR: cur = 32\n");
+            break;
+        }
+        if(line[i] == ' ' || line[i] == '\n' || line[i] == ':'){
+            if(b != 0){
+                pri[cur++] = b;
+                b = 0;
+            }
+            continue;
+        }
+        number = 0;
+        byte = line[i];
+        if(byte >= '0' && byte <= '9'){
+            number = byte - '0';
+        } else if(byte >= 'a' && byte <= 'f'){
+            number = byte - 'a' + 10;
+        }
+        if(high_bit){
+            b += number * 16;
+            high_bit = 0;
+        } else{
+            b += number;
+            high_bit = 1;
+        }
+    }
+    printHex(pri, 32);
+    unsigned char *pub = (unsigned char*)malloc(PUBLIC_KEY_SIZE);
+    sm2_make_pubkey(pri, (ecc_point *)pub);
+    printf("pub key: \n");
+    printHex(pub, PUBLIC_KEY_SIZE);
+}
+
 int main(int argc, char* argv[])
 {
     printf("hello world\n");
+
+	// const char *path[8] = {NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL};
+	// int res = -1, mode = -1;
+	// //Parse command line
+    // if(cmdline_parse(argc, argv, &mode, path) == false)
+    // {
+    //     printf(USAGE_STRING);
+    //     goto clear_return;
+    // }
+    // if(mode == -1) // User only wants to get the help info
+    // {
+    //     res = 0;
+    //     goto clear_return;
+    // }
+	// else if(mode == DUMP)
+    // {
+    //     // dump metadata info
+    //     if(dump_enclave_metadata(path[ELF], path[DUMPFILE]) == false)
+    //     {
+    //         printf("Failed to dump metadata info to file \"%s\".\n.", path[DUMPFILE]);
+    //         goto clear_return;
+    //     }
+    //     printf("Succeed.\n");
+    //     res = 0;
+    //     goto clear_return;
+    // }
+
+	// if(mode == SIGN)
+	// {
+
+	// }
+
+	// //Other modes
+	// if(parse_key_file(mode, path[KEY], &rsa, &key_type) == false && key_type != NO_KEY)
+    // {
+    //     goto clear_return;
+    // }
+
+    generate_key_pair("pub_key.pem", "pri_key.pem");
+    get_key_pair("pub_key.pem", "pri_key.pem");
+
+    parse_pri_key_file("pri_key.pem");
+    char *msg = "Helloworld shangqy\n";
+
+
+    return 0;
+
 	if(argc <= 1)
     {
         printf("Please input the enclave ELF file name\n");
     }
     struct elf_args* enclaveFile = malloc(sizeof(struct elf_args));
     char * eappfile = argv[1];
-    
+
 	printf("sign file: %s\n", eappfile);
     elf_args_init(enclaveFile, eappfile);
     if(!elf_valid(enclaveFile))
@@ -279,6 +611,7 @@ int main(int argc, char* argv[])
     free(enclave);
     free(params);
 
+clear_return:
 out:
     elf_args_destroy(enclaveFile);
     free(enclaveFile);
