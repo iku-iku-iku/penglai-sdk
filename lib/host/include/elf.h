@@ -15,7 +15,7 @@ struct elf_args
     void * ptr;
 };
 
-void elf_args_init(struct elf_args* elf_args, char *filename);
+void elf_args_init(struct elf_args* elf_args, const char *filename);
 void elf_args_destroy(struct elf_args* elf_args);
 bool elf_valid(struct elf_args* elf_args); 
 

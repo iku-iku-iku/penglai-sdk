@@ -1,5 +1,10 @@
+#ifndef _ST_UTIL_H
+#define _ST_UTIL_H
+
+#include <stddef.h>
+
 #define USAGE_STRING \
-    "\nUsage: sgx_sign <commands> [options] file...\n"\
+    "\nUsage: penglai_sign <commands> [options] file...\n"\
     "Commands:\n"\
     "   sign                    Sign the enclave using the private key\n"\
     "   gendata                 Generate enclave signing material to be signed\n"\
@@ -11,7 +16,6 @@
     "                           It is a required option for the four commands\n"\
     "   -key                    Specify the key file\n"\
     "                           It is a required option for \"sign\" and \"catsig\"\n"\
-    "   -config                 Specify the configuration for the enclave\n"\
     "   -out                    Specify the output file\n"\
     "                           It is a required option for \"sign\", \"gendata\" and \"catsig\"\n"\
     "   -sig                    Specify the signature file for the enclave signing material\n" \
@@ -20,19 +24,7 @@
     "                           It is a required option for \"catsig\"\n" \
     "   -dumpfile               Specify a file to dump metadata information (text format)\n" \
     "                           It is a required option for \"dump\"\n" \
-    "   -cssfile                Specify a file to dump the enclave SIGSTRUCT information (binary format)\n" \
-    "   -ignore-rel-error       By default, sgx_sign provides an error for enclaves with\n" \
-    "                           text relocations. You can ignore the error and continue signing\n" \
-    "                           by providing this option. But it is recommended you eliminate the\n" \
-    "                           text relocations instead of bypassing the error with this option.\n" \
-    "   -ignore-init-sec-error  By default, sgx_sign provides an error for enclaves with .init section.\n" \
-    "                           You can ignore the error and continue signing by providing this option.\n" \
-    "                           But it is recommended you eliminate the section instead of bypassing\n" \
-    "                           the error with this option.\n" \
-    "   -resign                 By default, sgx_sign reports an error if an input enclave has already been signed.\n" \
-    "                           You can force sgx_sign to resign the enclave by providing this option.\n\n" \
-    "Run \"sgx_sign -help\" to get this help and exit.\n" \
-    "Run \"sgx_sign -version\" to output version information and exit.\n\n"
+    "Run \"penglai_sign -help\" to get this help and exit.\n"
 
 typedef enum _command_mode_t
 {
@@ -42,7 +34,10 @@ typedef enum _command_mode_t
     DUMP
 } command_mode_t;
 
-// size_t get_file_size(const char *filename);
+void printHex(unsigned char *c, int n);
+int get_file_size(const char *filename);
 int read_file_to_buf(const char *filename, unsigned char *buffer, size_t bsize, long offset);
 int write_data_to_file(const char *filename, const char *modes, unsigned char *buf, size_t bsize, long offset);
 int copy_file(const char *source_path, const char *dest_path);
+
+#endif

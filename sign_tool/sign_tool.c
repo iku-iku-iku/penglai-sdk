@@ -1,13 +1,11 @@
 #include <stdio.h>
 #include <stdlib.h>
-#include "math.h"
 #include "penglai-enclave.h"
 #include "param.h"
 #include "penglai-enclave-elfloader.h"
 #include "attest.h"
 #include "riscv64.h"
 #include "util.h"
-#include <assert.h>
 #include "parse_key_file.h"
 
 #define DEFAULT_CLOCK_DELAY 100000
@@ -20,9 +18,6 @@
 #define MAX_STACK_SIZE 64*1024*1024
 #define MAX_UNTRUSTED_MEM_SIZE 16*1024*1024
 
-#define PAGE_UP(addr)	(((addr)+((RISCV_PGSIZE)-1))&(~((RISCV_PGSIZE)-1)))
-#define PAGE_DOWN(addr)	((addr)&(~((RISCV_PGSIZE)-1)))
-
 typedef enum _file_path_t
 {
     ELF = 0,
@@ -32,21 +27,6 @@ typedef enum _file_path_t
     UNSIGNED,
     DUMPFILE
 } file_path_t;
-
-void printHex(unsigned char *c, int n)
-{
-	int i;
-	for (i = 0; i < n; i++) {
-		printf("0x%02X, ", c[i]);
-		if ((i%4) == 3)
-		    printf(" ");
-
-		if ((i%16) == 15)
-		    printf("\n");
-	}
-	if ((i%16) != 0)
-		printf("\n");
-}
 
 unsigned int total_enclave_page(int elf_size, int stack_size)
 {
@@ -184,7 +164,7 @@ int read_metadata(const char *eappfile, enclave_css_t *enclave_css, uint64_t met
     return read_file_to_buf(eappfile, (unsigned char *)enclave_css, sizeof(enclave_css_t), meta_offset);
 }
 
-int dump_enclave_metadata(const char *eappfile, const char *dumpfile)
+bool dump_enclave_metadata(const char *eappfile, const char *dumpfile)
 {
     enclave_css_t enclave_css;
     unsigned long meta_offset;
@@ -195,7 +175,7 @@ int dump_enclave_metadata(const char *eappfile, const char *dumpfile)
     memset(&enclave_css, 0, sizeof(enclave_css_t));
     read_metadata(eappfile, &enclave_css, meta_offset);
     ret = write_data_to_file(dumpfile, "wb", (unsigned char *)&enclave_css, sizeof(enclave_css_t), 0);
-    return ret;
+    return ret == 0 ? true : false;
 }
 
 static bool cmdline_parse(unsigned int argc, char *argv[], int *mode, const char **path)
@@ -343,6 +323,8 @@ static bool cmdline_parse(unsigned int argc, char *argv[], int *mode, const char
 int main(int argc, char* argv[])
 {
     printf("Welcome to PENGLAI sign_tool!\n");
+    generate_sm2_sig();
+    return 0;
 
 	const char *path[8] = {NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL};
 	int res = -1, mode = -1;
@@ -388,12 +370,13 @@ int main(int argc, char* argv[])
         if(ret != 0){
             printf("ERROR: verify enclave_css struct failed!\n");
         }
-        // printf("[load_enclave] signature: \n");
-        // printHex(enclave_css.signature, SIGNATURE_SIZE);
-        // printf("[load_enclave] private_key: \n");
-        // printHex(private_key, PRIVATE_KEY_SIZE);
-        // printf("[load_enclave] public_key: \n");
-        // printHex(enclave_css.user_pub_key, PUBLIC_KEY_SIZE);
+        printf("[load_enclave] signature: \n");
+        printHex(enclave_css.signature, SIGNATURE_SIZE);
+        // generate_signature_DER("sig-der", enclave_css.signature);
+        printf("[load_enclave] private_key: \n");
+        printHex(private_key, PRIVATE_KEY_SIZE);
+        printf("[load_enclave] public_key: \n");
+        printHex(enclave_css.user_pub_key, PUBLIC_KEY_SIZE);
 
         // generate out
         copy_file(path[ELF], path[OUTPUT]);
@@ -422,23 +405,35 @@ int main(int argc, char* argv[])
     {
         printf("CATSIG enclave: %s, keyfile: %s, output: %s, signatrue: %s, unsigned hash: %s, dumpfile(optional): %s\n", 
             path[ELF], path[KEY], path[OUTPUT], path[SIG], path[UNSIGNED], (path[DUMPFILE] ? path[DUMPFILE] : "--"));
-        // load enclave, calcu enclave hash
+        // load enclave to get meta_offset
         enclave_css_t enclave_css;
         unsigned long meta_offset;
         if(load_enclave(path[ELF], &enclave_css, &meta_offset) < 0){
             printf("ERROR: load enclave failed!\n");
+            goto clear_return;
         }
         // parse public key, verify signature
+        unsigned char *hash = (unsigned char *)malloc(HASH_SIZE);
+        read_file_to_buf(path[UNSIGNED], hash, HASH_SIZE, 0);
+        printHex(hash, HASH_SIZE);
         unsigned char *public_key = (unsigned char *)malloc(PUBLIC_KEY_SIZE);
         parse_pub_key_file(path[KEY], public_key);
+        printHex(public_key, PUBLIC_KEY_SIZE);
         unsigned char *signature = (unsigned char *)malloc(SIGNATURE_SIZE);
-        read_file_to_buf(path[UNSIGNED], signature, SIGNATURE_SIZE, 0);
-        int ret = verify_enclave((struct signature_t *)signature, enclave_css.enclave_hash, public_key);
+        parse_signature_DER(path[SIG], signature);
+        printHex(signature, SIGNATURE_SIZE);
+        int ret = verify_enclave((struct signature_t *)signature, hash, public_key);
         if(ret != 0){
             printf("ERROR: verify signature failed!\n");
+            goto clear_return;
         }
         // append signature to eappfile
         copy_file(path[ELF], path[OUTPUT]);
+        if(memcmp(enclave_css.enclave_hash, hash, HASH_SIZE) != 0){
+            printf("ERROR: UNSIGNED hash is wrong.\n");
+            goto clear_return;
+        }
+        memcpy(enclave_css.enclave_hash, hash, HASH_SIZE);
         memcpy(enclave_css.signature, signature, SIGNATURE_SIZE);
         memcpy(enclave_css.user_pub_key, public_key, PUBLIC_KEY_SIZE);
         update_metadata(path[OUTPUT], &enclave_css, meta_offset);

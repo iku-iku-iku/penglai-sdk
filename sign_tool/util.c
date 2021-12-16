@@ -3,6 +3,33 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <stdio.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+
+void printHex(unsigned char *c, int n)
+{
+	int i;
+	for (i = 0; i < n; i++) {
+		printf("0x%02X, ", c[i]);
+		if ((i%4) == 3)
+		    printf(" ");
+
+		if ((i%16) == 15)
+		    printf("\n");
+	}
+	if ((i%16) != 0)
+		printf("\n");
+}
+
+int get_file_size(const char *filename)
+{
+    struct stat st; 
+
+    if (stat(filename, &st) == 0)
+        return st.st_size;
+
+    return -1; 
+}
 
 int read_file_to_buf(const char *filename, unsigned char *buffer, size_t bsize, long offset)
 {

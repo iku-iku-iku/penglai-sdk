@@ -1,6 +1,6 @@
 #include "elf.h"
 
-void elf_args_init(struct elf_args* elf_args, char *filename)
+void elf_args_init(struct elf_args* elf_args, const char *filename)
 {
   int fs;
   struct stat stat_buf;

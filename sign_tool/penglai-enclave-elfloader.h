@@ -3,6 +3,10 @@
 
 #include <linux/elf.h>
 #include "penglai-enclave-page.h"
+#include "math.h"
+
+#define PAGE_UP(addr)	(((addr)+((RISCV_PGSIZE)-1))&(~((RISCV_PGSIZE)-1)))
+#define PAGE_DOWN(addr)	((addr)&(~((RISCV_PGSIZE)-1)))
 
 int penglai_enclave_eapp_preprare(
 		enclave_mem_t* enclave_mem,  
