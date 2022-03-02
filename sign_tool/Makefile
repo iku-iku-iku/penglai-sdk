@@ -12,7 +12,7 @@ all: SIGN_TOOL
 GM:
 	make -C gm
 
-SIGN_TOOL: GM
+SIGN_TOOL:
 	$(CC) -o penglai_sign -I $(PENGLAI_SDK)/lib/host/include/ $(CUR_SOURCE) libpenglai-signtool_gm.a $(PENGLAI_SDK)/lib/libpenglai-enclave-host.a -lcrypto -ldl -lpthread
 
 clean:

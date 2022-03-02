@@ -14,29 +14,27 @@
 #include "attest.h"
 
 void parse_priv_key_file(const char* priv_key_file, unsigned char* priv_key, unsigned char* pub_key){
-    // printf("\nread pri key file:\n");
-    // FILE * f = fopen(priv_key_file, "r");
-    // EVP_PKEY *pkey = PEM_read_PrivateKey(f,NULL,NULL,NULL);
-    // fclose(f);
-    // int pri_len;
-    // EVP_PKEY_get_raw_private_key(pkey, priv_key, &pri_len);
-    // printf("pri_key len: %d\n", pri_len);
-    // printHex(priv_key, pri_len);
-
-    
     printf("\nread pri key file:\n");
     FILE * f = fopen(priv_key_file, "r");
-    EC_KEY *ec_key = PEM_read_ECPrivateKey(f,NULL,NULL,NULL);
+    if (!f) printf("file is NULL!\n");
+    EVP_PKEY *pkey = PEM_read_PrivateKey(f,NULL,NULL,NULL);
+    
+    if (!pkey) printf("pkey is NULL!\n");
     fclose(f);
-    // assert(1==EC_KEY_check_key(ec_key));
 
-    BIO * bio1 = BIO_new_fp(stdout,0);
-    assert(1==EC_KEY_print(bio1, ec_key, 0));
-    BIO_free(bio1);
+    BIO * bio_fp = BIO_new_fp(stdout,0);
+    EVP_PKEY_print_private(bio_fp, pkey, 0, NULL);
+    BIO_free(bio_fp);
 
+    /*
+     * TODO: 
+     *  In openssl 3.0.0, some functions are temporarily not supported for SM2 algorithm,
+     *  such as EVP_PKEY_get_raw_private_key(). So we implement similar logic below. When
+     *  these functions are supported, we will migrate to a later version and use them instead.
+     */
     BIO * bio = BIO_new(BIO_s_mem());
-    EC_KEY_print(bio, ec_key, 0);
-    EC_KEY_free(ec_key);
+    EVP_PKEY_print_private(bio, pkey, 0, NULL);
+    EVP_PKEY_free(pkey);
 
     char *line;
     line = (char*)malloc(1024);
@@ -50,11 +48,10 @@ void parse_priv_key_file(const char* priv_key_file, unsigned char* priv_key, uns
     printf("%s", line);
     free(line);
 
-    printf("calcu:\n");
     long num = BIO_get_mem_data(bio, &line);
     unsigned char b = 0;
     int cur = 0;
-    int high_bit = 1;
+    int number_numbers = 0;
     int number = 0;
     char byte;
     for(int i = 0; i < num; i++){
@@ -62,44 +59,48 @@ void parse_priv_key_file(const char* priv_key_file, unsigned char* priv_key, uns
             break;
         }
         if(line[i] == ' ' || line[i] == '\n' || line[i] == ':'){
-            if(b != 0){
+            if(number_numbers == 2){
                 priv_key[cur++] = b;
                 b = 0;
+                number_numbers = 0;
             }
             continue;
         }
-        number = 0;
         byte = line[i];
         if(byte >= '0' && byte <= '9'){
             number = byte - '0';
         } else if(byte >= 'a' && byte <= 'f'){
             number = byte - 'a' + 10;
         }
-        if(high_bit){
-            b += number * 16;
-            high_bit = 0;
-        } else{
-            b += number;
-            high_bit = 1;
-        }
+        b = b * 16 + number;
+        number_numbers++;
     }
-    
+
     sm2_make_pubkey(priv_key, (ecc_point *)pub_key);
 }
 
 void parse_pub_key_file(const char* pub_key_file, unsigned char* pub_key){
     printf("\nread pub key file:\n");
     FILE * f = fopen(pub_key_file, "r");
-    EC_KEY *ec_key = PEM_read_EC_PUBKEY(f, NULL, NULL, NULL);
+    if (!f) printf("file is NULL!\n");
+    EVP_PKEY *pkey = PEM_read_PUBKEY(f,NULL,NULL,NULL);
+
+    if (!pkey) printf("pkey is NULL!\n");
     fclose(f);
 
-    BIO * bio1 = BIO_new_fp(stdout,0);
-    assert(1==EC_KEY_print(bio1, ec_key, 0));
-    BIO_free(bio1);
+    BIO * bio_fp = BIO_new_fp(stdout,0);
+    EVP_PKEY_print_public(bio_fp, pkey, 0, NULL);
+    BIO_free(bio_fp);
 
+    /*
+     * TODO: 
+     *  In openssl 3.0.0, some functions are temporarily not supported for SM2 algorithm,
+     *  such as EVP_PKEY_get_raw_public_key(). So we implement similar logic below. When
+     *  these functions are supported, we will migrate to a later version and use them instead.
+     */
     BIO * bio = BIO_new(BIO_s_mem());
-    EC_KEY_print(bio, ec_key, 0);
-    EC_KEY_free(ec_key);
+    EVP_PKEY_print_public(bio, pkey, 0, NULL);
+    EVP_PKEY_free(pkey);
 
     char *line;
     line = (char*)malloc(1024);
@@ -113,12 +114,11 @@ void parse_pub_key_file(const char* pub_key_file, unsigned char* pub_key){
     printf("%s", line);
     free(line);
 
-    printf("calcu:\n");
     int skip_z = 0;
     long num = BIO_get_mem_data(bio, &line);
     unsigned char b = 0;
     int cur = 0;
-    int high_bit = 1;
+    int number_numbers = 0;
     int number = 0;
     char byte;
     for(int i = 0; i < num; i++){
@@ -126,36 +126,28 @@ void parse_pub_key_file(const char* pub_key_file, unsigned char* pub_key){
             break;
         }
         if(line[i] == ' ' || line[i] == '\n' || line[i] == ':'){
-            if(b != 0){
+            if(number_numbers == 2){
                 if(!skip_z){
                     skip_z = 1;
-                    /*
-                    FIXME: use b != 0 to judge isn't right
-                    */
                     b = 0;
+                    number_numbers = 0;
                     continue;
                 }
                 pub_key[cur++] = b;
                 b = 0;
+                number_numbers = 0;
             }
             continue;
         }
-        number = 0;
         byte = line[i];
         if(byte >= '0' && byte <= '9'){
             number = byte - '0';
         } else if(byte >= 'a' && byte <= 'f'){
             number = byte - 'a' + 10;
         }
-        if(high_bit){
-            b += number * 16;
-            high_bit = 0;
-        } else{
-            b += number;
-            high_bit = 1;
-        }
+        b = b * 16 + number;
+        number_numbers++;
     }
-    printHex(pub_key, PUBLIC_KEY_SIZE);
 }
 
 void parse_signature_DER(const char* sig_file, unsigned char* signature){
@@ -175,10 +167,9 @@ void parse_signature_DER(const char* sig_file, unsigned char* signature){
     printf("post r  :%s\n", BN_bn2hex(ECDSA_SIG_get0_r(ec_sig)));
     printf("post s  :%s\n", BN_bn2hex(ECDSA_SIG_get0_s(ec_sig)));
 
-    BIO * bio = BIO_new(BIO_s_mem());
-    BN_print(bio, ECDSA_SIG_get0_r(ec_sig));
-    BN_print(bio, ECDSA_SIG_get0_s(ec_sig));
-    BIO_gets(bio, signature, SIGNATURE_SIZE);
+    struct signature_t* sig = (struct signature_t*)signature;
+    BN_bn2binpad(ECDSA_SIG_get0_r(ec_sig), sig->r, SIGNATURE_SIZE/2);
+    BN_bn2binpad(ECDSA_SIG_get0_s(ec_sig), sig->s, SIGNATURE_SIZE/2);
 
     free(buf);
 }
@@ -219,55 +210,8 @@ void generate_signature_DER(const char* sig_file, unsigned char* sig){
 }
 
 /*
-    below functions are here for debug openssl
+    below functions are here for printf openssl
 */
-void generate_key_pair(char* pub_key, char* priv_key){
-    EC_KEY *ec_key = EC_KEY_new_by_curve_name(NID_sm2);
-    assert(1==EC_KEY_generate_key(ec_key));
-    assert(1==EC_KEY_check_key(ec_key));
-
-    BIO * bio = BIO_new_fp(stdout,0);
-    assert(1==EC_KEY_print(bio, ec_key, 0));
-    BIO_free(bio);
-
-    {
-        FILE * f = fopen(pub_key,"w");
-        PEM_write_EC_PUBKEY(f, ec_key);
-        //PEM_write_bio_EC_PUBKEY(bio, ec_key);
-        fclose(f);
-    }
-
-    {
-        FILE * f = fopen(priv_key,"w");
-        PEM_write_ECPrivateKey(f,ec_key, NULL,NULL,0,NULL,NULL);
-        //PEM_write_bio_ECPrivateKey(bio,ec_key, NULL,NULL,0,NULL,NULL);
-        fclose(f);
-    }
-
-    EC_KEY_free(ec_key);
-
-    // BIO * bio_out = BIO_new_fp(stdout,0);
-    // EVP_PKEY *key = NULL;
-    // OSSL_PARAM params[2];
-    // EVP_PKEY_CTX *gctx =
-    //     EVP_PKEY_CTX_new_from_name(NULL, "EC", NULL);
-
-    // EVP_PKEY_keygen_init(gctx);
-
-    // params[0] = OSSL_PARAM_construct_utf8_string("group", "SM2", 0);
-    // params[1] = OSSL_PARAM_construct_end();
-    // EVP_PKEY_CTX_set_params(gctx, params);
-
-    // EVP_PKEY_generate(gctx, &key);
-
-    // EVP_PKEY_print_private(bio_out, key, 0, NULL);
-
-    // EVP_PKEY_free(key);
-    // EVP_PKEY_CTX_free(gctx);
-}
-
-
-
 void generate_sm2_sig(){
     BIO * bio_out = BIO_new_fp(stdout,0);
     EVP_PKEY *pkey = NULL;
@@ -285,18 +229,14 @@ void generate_sm2_sig(){
 
     EVP_PKEY_print_private(bio_out, pkey, 0, NULL);
     char *priv_file = "pri-file";
-    EC_KEY *ec_key = EVP_PKEY_get1_EC_KEY(pkey);
-    {
-        FILE * f = fopen(priv_file,"w");
-        PEM_write_ECPrivateKey(f,ec_key, NULL,NULL,0,NULL,NULL);
-        fclose(f);
-    }
+    FILE * f = fopen(priv_file,"w");
+    EVP_PKEY_print_private_fp(f, pkey, 0, NULL);
+    fclose(f);
 
     char *msg = "hello sqy";
     int msg_len = strlen(msg);
     unsigned char *sig = malloc(SIGNATURE_SIZE);
-    int sig_len = SIGNATURE_SIZE;
-
+    size_t sig_len = SIGNATURE_SIZE;
 
     /* obtain an EVP_PKEY using whatever methods... */
     EVP_MD_CTX *mctx = EVP_MD_CTX_new();
@@ -386,22 +326,4 @@ void generate_sm2_sig(){
 
     EVP_PKEY_free(pkey);
     EVP_PKEY_CTX_free(gctx);
-}
-
-void get_key_pair(char* pub_key, char* priv_key){
-    printf("\nread pri key:\n");
-    FILE * f = fopen(priv_key, "r");
-    EC_KEY *ec_key = PEM_read_ECPrivateKey(f,NULL,NULL,NULL);
-    fclose(f);
-    assert(1==EC_KEY_check_key(ec_key));
-    BIO * bio = BIO_new_fp(stdout,0);
-    EC_KEY_print(bio, ec_key, 0);
-    EC_KEY_free(ec_key);
-
-    // printf("read pub key:\n");
-    // f = fopen(pub_key, "r");
-    // ec_key = PEM_read_EC_PUBKEY(f, NULL, NULL, NULL);
-    // fclose(f);
-    // EC_KEY_print(bio, ec_key, 0);
-    // EC_KEY_free(ec_key);
 }

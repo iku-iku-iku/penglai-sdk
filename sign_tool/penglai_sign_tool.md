@@ -5,8 +5,7 @@
 编译penglai sign tool 需要首先在docker 中编译gm国密算法库，接着在安装有openssl 3.0.0的RICS-V qemu中编译sign tool 工具。在SDK编译过程中即可编译gm库，之后进入RISC-V qemu中的sign tool 目录编译。
 
 ```
-cd sdk
-PENGLAI_SDK=$(pwd) make -j8
+cd sdk && SDK=$(pwd) && cd sign_tool/ && PENGLAI_SDK=$SDK make
 ```
 
 获得的二进制为`penglai_sign`
@@ -110,8 +109,8 @@ openssl pkeyutl -verify -in metadata-file -inkey SM2PrivateKey.pem -sigfile sig-
 Step 3: 使用签名文件和公钥为原enclave 文件添加签名信息 ，该命令需要输入原enclave 文件对签名材料进行验证
 
 ```
-./penglai catsign -enclave prime -key SM2PublicKey.pem -unsigned metadata-file -sig sig-file \
-	-out prime-signed
+./penglai_sign catsig -enclave prime -key SM2PublicKey.pem -unsigned metadata-file -sig sig-file \
+    -out prime-signed
 ```
 
 ***Note:*** 目前，蓬莱内部的密码算法使用gm算法库，经测试该算法库无法验证使用openssl 的签名，认为是密码库内部实现上有差别（已排除密钥、摘要输入格式的问题），所以两步签名得到的签名文件无法通过Secure Monitor 的验证。两步签名的正确性留给Secure Monitor移植openssl 密码库后解决。

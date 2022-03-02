@@ -94,6 +94,7 @@ int penglai_enclave_create(struct penglai_enclave_user_param* enclave_param, enc
 				&elf_entry, STACK_POINT, stack_size, &meta_offset, &meta_blocksize))
 	{
 		printf("SIGN_TOOL: penglai_enclave_eapp_preprare is failed\n");
+        return -1;
 	}
 	if(elf_entry == 0)
 	{
@@ -138,10 +139,11 @@ int load_enclave(const char *eappfile, enclave_css_t *enclave_css, unsigned long
     }
     user_param = malloc(sizeof(struct penglai_enclave_user_param));
     init_enclave_user_param(user_param, enclaveFile);
-    penglai_enclave_create(user_param, enclave_css, meta_offset);
+    ret = penglai_enclave_create(user_param, enclave_css, meta_offset);
+    
+    free(user_param);
 out:
     elf_args_destroy(enclaveFile);
-    free(user_param);
     free(enclaveFile);
     return ret;
 }
@@ -170,12 +172,22 @@ bool dump_enclave_metadata(const char *eappfile, const char *dumpfile)
     unsigned long meta_offset;
     int ret = 0;
 
-    load_enclave(eappfile, &enclave_css, &meta_offset);
+    ret = load_enclave(eappfile, &enclave_css, &meta_offset);
+    if(ret != 0){
+        return false;
+    }
 
     memset(&enclave_css, 0, sizeof(enclave_css_t));
-    read_metadata(eappfile, &enclave_css, meta_offset);
+    ret = read_metadata(eappfile, &enclave_css, meta_offset);
+    if(ret != 0){
+        return false;
+    }
+
     ret = write_data_to_file(dumpfile, "wb", (unsigned char *)&enclave_css, sizeof(enclave_css_t), 0);
-    return ret == 0 ? true : false;
+    if(ret != 0){
+        return false;
+    }
+    return true;
 }
 
 static bool cmdline_parse(unsigned int argc, char *argv[], int *mode, const char **path)
@@ -323,8 +335,6 @@ static bool cmdline_parse(unsigned int argc, char *argv[], int *mode, const char
 int main(int argc, char* argv[])
 {
     printf("Welcome to PENGLAI sign_tool!\n");
-    generate_sm2_sig();
-    return 0;
 
 	const char *path[8] = {NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL};
 	int res = -1, mode = -1;
@@ -360,15 +370,26 @@ int main(int argc, char* argv[])
         unsigned long meta_offset;
         if(load_enclave(path[ELF], &enclave_css, &meta_offset) < 0){
             printf("ERROR: load enclave failed!\n");
+            goto clear_return;
         }
 
         // parse private key, sign and verify
         unsigned char *private_key = (unsigned char *)malloc(PRIVATE_KEY_SIZE);
         parse_priv_key_file(path[KEY], private_key, enclave_css.user_pub_key);
         sign_enclave((struct signature_t *)(enclave_css.signature), enclave_css.enclave_hash, private_key);
+
+        //
+        printf("signature:\n");
+        printHex(enclave_css.signature, SIGNATURE_SIZE);
+        printf("hash:\n");
+        printHex(enclave_css.enclave_hash, HASH_SIZE);
+        printf("user publickey:\n");
+        printHex(enclave_css.user_pub_key, PUBLIC_KEY_SIZE);
+        printf("begin verify\n");
         int ret = verify_enclave((struct signature_t *)(enclave_css.signature), enclave_css.enclave_hash, enclave_css.user_pub_key);
         if(ret != 0){
             printf("ERROR: verify enclave_css struct failed!\n");
+            goto clear_return;
         }
         printf("[load_enclave] signature: \n");
         printHex(enclave_css.signature, SIGNATURE_SIZE);
@@ -415,12 +436,16 @@ int main(int argc, char* argv[])
         // parse public key, verify signature
         unsigned char *hash = (unsigned char *)malloc(HASH_SIZE);
         read_file_to_buf(path[UNSIGNED], hash, HASH_SIZE, 0);
+        printf("hash:\n");
         printHex(hash, HASH_SIZE);
         unsigned char *public_key = (unsigned char *)malloc(PUBLIC_KEY_SIZE);
         parse_pub_key_file(path[KEY], public_key);
+        printf("public key:\n");
         printHex(public_key, PUBLIC_KEY_SIZE);
+        printf("publickey finish\n");
         unsigned char *signature = (unsigned char *)malloc(SIGNATURE_SIZE);
         parse_signature_DER(path[SIG], signature);
+        printf("signature:\n");
         printHex(signature, SIGNATURE_SIZE);
         int ret = verify_enclave((struct signature_t *)signature, hash, public_key);
         if(ret != 0){

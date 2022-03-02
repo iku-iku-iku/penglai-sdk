@@ -1,4 +1,4 @@
-#define METADATA_SIZE 0x5000
+#define METADATA_SIZE 0x1000
 .section ".note.penglaimeta", "", @note
     .p2align 2              /* section alignment */
     .long 1f - 0f           /* name size (not including padding) */
