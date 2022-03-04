@@ -9,11 +9,13 @@
 #include <openssl/evp.h>
 #include <string.h>
 #include "util.h"
-#include "gm/sm2.h"
+#include "SM2_sv.h"
 #include "param.h"
 #include "attest.h"
 
-void parse_priv_key_file(const char* priv_key_file, unsigned char* priv_key, unsigned char* pub_key){
+int parse_priv_key_file(const char* priv_key_file, unsigned char* priv_key, unsigned char* pubkey_arg){
+    int ret;
+
     printf("\nread pri key file:\n");
     FILE * f = fopen(priv_key_file, "r");
     if (!f) printf("file is NULL!\n");
@@ -76,10 +78,17 @@ void parse_priv_key_file(const char* priv_key_file, unsigned char* priv_key, uns
         number_numbers++;
     }
 
-    sm2_make_pubkey(priv_key, (ecc_point *)pub_key);
+    struct pubkey_t *pubkey = (struct pubkey_t *)pubkey_arg;
+    ret = SM2_make_pubkey(priv_key, pubkey->xA, pubkey->yA);
+    if(ret != 0){
+        printf("SM2_make_pubkey failed\n");
+        return ret;
+    }
+
+    return 0;
 }
 
-void parse_pub_key_file(const char* pub_key_file, unsigned char* pub_key){
+int parse_pub_key_file(const char* pub_key_file, unsigned char* pub_key){
     printf("\nread pub key file:\n");
     FILE * f = fopen(pub_key_file, "r");
     if (!f) printf("file is NULL!\n");
@@ -148,6 +157,8 @@ void parse_pub_key_file(const char* pub_key_file, unsigned char* pub_key){
         b = b * 16 + number;
         number_numbers++;
     }
+
+    return 0;
 }
 
 void parse_signature_DER(const char* sig_file, unsigned char* signature){
@@ -302,7 +313,7 @@ void generate_sm2_sig(){
     }
 
     //plan 2 verify with gm lib
-    unsigned char *prikey = malloc(PUBLIC_KEY_SIZE);
+    unsigned char *prikey = malloc(PRIVATE_KEY_SIZE);
     unsigned char *pubkey = malloc(PUBLIC_KEY_SIZE);
     parse_priv_key_file(priv_file, prikey, pubkey);
     printf("pri:\n");
@@ -317,7 +328,7 @@ void generate_sm2_sig(){
     // EVP_PKEY_get_raw_public_key(pkey, pubkey, &pub_len);
     // printf("pub_key len: %d\n", pub_len);
     // printHex(pubkey, PUBLIC_KEY_SIZE);
-    if(verify_enclave((struct signature_t*)sig, hash, pubkey) == 0){
+    if(verify_enclave((struct signature_t*)sig, hash, HASH_SIZE, pubkey) == 0){
         printf("verify gm lib successfully\n");
     } else {
         printf("verify gm lib fail\n");

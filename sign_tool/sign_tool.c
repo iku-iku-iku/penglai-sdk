@@ -376,7 +376,7 @@ int main(int argc, char* argv[])
         // parse private key, sign and verify
         unsigned char *private_key = (unsigned char *)malloc(PRIVATE_KEY_SIZE);
         parse_priv_key_file(path[KEY], private_key, enclave_css.user_pub_key);
-        sign_enclave((struct signature_t *)(enclave_css.signature), enclave_css.enclave_hash, private_key);
+        sign_enclave((struct signature_t *)(enclave_css.signature), enclave_css.enclave_hash, HASH_SIZE, private_key);
 
         //
         printf("signature:\n");
@@ -386,7 +386,7 @@ int main(int argc, char* argv[])
         printf("user publickey:\n");
         printHex(enclave_css.user_pub_key, PUBLIC_KEY_SIZE);
         printf("begin verify\n");
-        int ret = verify_enclave((struct signature_t *)(enclave_css.signature), enclave_css.enclave_hash, enclave_css.user_pub_key);
+        int ret = verify_enclave((struct signature_t *)(enclave_css.signature), enclave_css.enclave_hash, HASH_SIZE, enclave_css.user_pub_key);
         if(ret != 0){
             printf("ERROR: verify enclave_css struct failed!\n");
             goto clear_return;
@@ -447,7 +447,7 @@ int main(int argc, char* argv[])
         parse_signature_DER(path[SIG], signature);
         printf("signature:\n");
         printHex(signature, SIGNATURE_SIZE);
-        int ret = verify_enclave((struct signature_t *)signature, hash, public_key);
+        int ret = verify_enclave((struct signature_t *)signature, hash, HASH_SIZE, public_key);
         if(ret != 0){
             printf("ERROR: verify signature failed!\n");
             goto clear_return;

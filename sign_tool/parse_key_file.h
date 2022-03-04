@@ -3,9 +3,9 @@
 
 #include <assert.h>
 
-void parse_priv_key_file(const char* priv_key_file, unsigned char* priv_key, unsigned char* pub_key);
+int parse_priv_key_file(const char* priv_key_file, unsigned char* priv_key, unsigned char* pub_key);
 
-void parse_pub_key_file(const char* pub_key_file, unsigned char* pub_key);
+int parse_pub_key_file(const char* pub_key_file, unsigned char* pub_key);
 
 void parse_signature_DER(const char* sig_file, unsigned char* signature);
 

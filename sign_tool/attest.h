@@ -15,10 +15,8 @@ typedef struct _enclave_css_t {        /* 160 bytes */
 
 void hash_enclave(unsigned long entry_point, enclave_mem_t* enclave_mem, void* hash, uintptr_t nonce_arg);
 
-int parse_key_file(void* prikey, void* pubkey);
+void sign_enclave(struct signature_t* signature, unsigned char *message, int len, unsigned char *prikey);
 
-void sign_enclave(struct signature_t* signature, void* hash, void* prikey);
-
-int verify_enclave(struct signature_t* signature, void* hash, void* pubkey);
+int verify_enclave(struct signature_t* signature, unsigned char *message, int len, unsigned char *pubkey);
 
 #endif

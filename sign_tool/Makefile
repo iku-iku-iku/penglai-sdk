@@ -5,16 +5,21 @@
 ##   doesn't support openssl. So compilation is done in RISC-V qemu. Compile GM in
 ##   docker.
 
-CC=gcc
-CUR_SOURCE=${wildcard *.c}
-all: SIGN_TOOL
+CC = gcc
+CUR_SOURCE = ${wildcard *.c}
 
-GM:
-	make -C gm
+SDK_LIB_DIR = $(PENGLAI_SDK)/lib
+GM_LIBS = $(SDK_LIB_DIR)/gm/sm2.a $(SDK_LIB_DIR)/gm/miracl.a
+GM_LIB_INCLUDE_DIR = $(SDK_LIB_DIR)/gm/include
+HOST_LIB = $(SDK_LIB_DIR)/libpenglai-enclave-host.a
+HOST_LIB_INCLUDE_DIR = $(SDK_LIB_DIR)/host/include
 
-SIGN_TOOL:
-	$(CC) -o penglai_sign -I $(PENGLAI_SDK)/lib/host/include/ $(CUR_SOURCE) libpenglai-signtool_gm.a $(PENGLAI_SDK)/lib/libpenglai-enclave-host.a -lcrypto -ldl -lpthread
+CFLAGS += -I $(HOST_LIB_INCLUDE_DIR) -I $(GM_LIB_INCLUDE_DIR) -lcrypto -ldl -lpthread
+
+all: penglai_sign
+
+penglai_sign: $(CUR_SOURCE) $(HOST_LIB) $(GM_LIBS)
+	$(CC) $(CFLAGS) -o $@ $^
 
 clean:
-	make -C gm clean
-	rm -f *.o sign_tool
+	rm -f *.o penglai_sign
