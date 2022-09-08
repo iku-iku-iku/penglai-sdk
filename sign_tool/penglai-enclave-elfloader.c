@@ -165,7 +165,7 @@ int penglai_enclave_loadelf(enclave_mem_t*enclave_mem, void* elf_ptr, unsigned l
 			printf("KERNEL MODULE: penglai enclave load program failed\n");
 			return -1;
 		}
-		printf("[Penglai Driver@%s] elf_prog_addr:0x%lx elf_prog_size:0x%x, infile_addr:0x%lx\n", __func__,
+		printf("[penglai_enclave_loadelf] elf_prog_addr:0x%lx elf_prog_size:0x%x, infile_addr:0x%lx\n",
 				elf_prog_addr, elf_prog_size, elf_prog_infile_addr);
 		elf_prog_ptr += sizeof(Elf64_Phdr);
 	}

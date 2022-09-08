@@ -378,26 +378,23 @@ int main(int argc, char* argv[])
         parse_priv_key_file(path[KEY], private_key, enclave_css.user_pub_key);
         sign_enclave((struct signature_t *)(enclave_css.signature), enclave_css.enclave_hash, HASH_SIZE, private_key);
 
-        //
-        printf("signature:\n");
+        printf("[sign_enclave] signature:\n");
         printHex(enclave_css.signature, SIGNATURE_SIZE);
-        printf("hash:\n");
+        // generate_signature_DER("sig-der", enclave_css.signature);
+        printf("[sign_enclave] enclave hash:\n");
         printHex(enclave_css.enclave_hash, HASH_SIZE);
-        printf("user publickey:\n");
+        printf("[sign_enclave] private_key: \n");
+        printHex(private_key, PRIVATE_KEY_SIZE);
+        printf("[sign_enclave] public_key: \n");
         printHex(enclave_css.user_pub_key, PUBLIC_KEY_SIZE);
         printf("begin verify\n");
         int ret = verify_enclave((struct signature_t *)(enclave_css.signature), enclave_css.enclave_hash, HASH_SIZE, enclave_css.user_pub_key);
         if(ret != 0){
             printf("ERROR: verify enclave_css struct failed!\n");
             goto clear_return;
+        } else {
+            printf("verify enclave's signature successfully.\n");
         }
-        printf("[load_enclave] signature: \n");
-        printHex(enclave_css.signature, SIGNATURE_SIZE);
-        // generate_signature_DER("sig-der", enclave_css.signature);
-        printf("[load_enclave] private_key: \n");
-        printHex(private_key, PRIVATE_KEY_SIZE);
-        printf("[load_enclave] public_key: \n");
-        printHex(enclave_css.user_pub_key, PUBLIC_KEY_SIZE);
 
         // generate out
         copy_file(path[ELF], path[OUTPUT]);
