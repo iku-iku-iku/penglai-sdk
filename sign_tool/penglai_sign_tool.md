@@ -2,7 +2,27 @@
 
 ### 1. 编译：
 
-编译penglai sign tool 需要首先在docker 中编译gm国密算法库，接着在安装有openssl 3.0.0的RICS-V qemu中编译sign tool 工具。在SDK编译过程中即可编译gm库，之后进入RISC-V qemu中的sign tool 目录编译。
+sign tool 依赖sdk目录下的gm国密算法库（Penglai secure monitor使用该库实现签名验签），以及OpenSSL 3.0.0（用于通用密钥文件格式的支持，详见[4. 补充openssl 的说明](#section4)）。
+
+编译penglai sign tool 需要首先在docker 中编译sdk目录下的gm国密算法库（在SDK编译过程中即可编译gm库，参考 https://github.com/Shang-QY/Penglai-Enclave-sPMP#build-penglai-sdk ，这里不另作说明），接着在安装有OpenSSL 3.0.0的RICS-V Qemu中编译sign tool 工具。
+
+#### 1.1 在RISC-V Qemu中安装OpenSSL 3.0.0
+
+***选项一***：可以从OpenSSL官网下载3.0.0版本的源码压缩包 [下载地址:https://www.openssl.org/source/old/3.0/openssl-3.0.0.tar.gz]，并在Qemu中按照`INSTALL.md`说明进行编译安装。由于在Qemu中，编译所需时间较长。
+
+***选项二***：为了方便测试，我们也提供了基于RISC-V Qemu 和OpenEuler 发行版镜像（与[Case: Running openEuler with Penglai](https://github.com/Shang-QY/Penglai-Enclave-sPMP#case-running-openeuler-with-penglai) 环境相同）的预编译版本 [点击下载](https://ipads.se.sjtu.edu.cn:1313/f/2e621476fa544e68bf68/?dl=1)，可将该压缩包拷贝到Qemu中解压，并直接运行`make install`安装即可，如下是Qemu中安装时输出。
+
+```
+[root@openEuler-RISCV-rare openssl_libs]# make install
+cp -r include/openssl /usr/local/include
+cp -r lib/* /usr/local/lib
+cp -r app/* /usr/local/bin
+[root@openEuler-RISCV-rare openssl_libs]#
+```
+
+#### 在Qemu中编译
+
+请将sdk拷贝到RISC-V Qemu中，然后进入RISC-V Qemu中的sign tool 目录进行编译。
 
 ```
 cd sdk && SDK=$(pwd) && cd sign_tool/ && PENGLAI_SDK=$SDK make
@@ -115,13 +135,13 @@ Step 3: 使用签名文件和公钥为原enclave 文件添加签名信息 ，该
 
 ***Note:*** 目前，蓬莱内部的密码算法使用gm算法库，经测试该算法库无法验证使用openssl 的签名，认为是密码库内部实现上有差别（已排除密钥、摘要输入格式的问题），所以两步签名得到的签名文件无法通过Secure Monitor 的验证。两步签名的正确性留给Secure Monitor移植openssl 密码库后解决。
 
+### 3. 视频Demo展示
 
+我们提供了使用单步签名的演示视频，请参考[链接](https://ipads.se.sjtu.edu.cn:1313/f/1ceba27708c74cbab4c0/)。
 
-### 3. 补充openssl 的说明
+### 4. 补充openssl 的说明 {#section4}
 
-目前penglai sign_tool对 openssl 的依赖在于需要用openssl 的PEM decoder和DER decoder，相应逻辑涉及base64转byte array，提取算法国际标号等。PEM decoder和DER decoder逻辑相对固定，可独立openssl 进行实现。
-
-但是，（1）经过hack openssl的代码，发现同等输入条件下openssl 的签名不能被gm 库验证通过，可能gm 库存在问题，于是将尝试用openssl 替换gm 库。（2）在国密标准中，使用SM2做签名时需添加z值作为原文件前缀，再进行hash和计算，这些内容都需要独立实现，不能保证正确性。
+目前penglai sign_tool对 openssl 的依赖在于需要用openssl 的PEM decoder和DER decoder，相应逻辑涉及base64转byte array，提取算法国际标号等。
 
 用openssl 签名（验证）hash：（SM2的hash 要求为32 位byte array）
 
