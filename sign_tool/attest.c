@@ -99,7 +99,8 @@ static int hash_enclave_mem(SM3_STATE *hash_ctx, pt_entry_t* ptes, int level, ui
   return hash_curr_va;
 }
 
-void hash_enclave(unsigned long entry_point, enclave_mem_t* enclave_mem, void* hash, uintptr_t nonce_arg)
+void hash_enclave(unsigned long entry_point, enclave_mem_t* enclave_mem, void* hash, uintptr_t nonce_arg, uintptr_t untrusted_ptr,
+                  uintptr_t untrusted_size, uintptr_t kbuffer_ptr, uintptr_t kbuffer_size)
 {
   SM3_STATE hash_ctx;
   uintptr_t nonce = nonce_arg;
@@ -108,9 +109,18 @@ void hash_enclave(unsigned long entry_point, enclave_mem_t* enclave_mem, void* h
 
   SM3_process(&hash_ctx, (unsigned char*)(&entry_point), sizeof(unsigned long));
 //   print_sm3_state(&hash_ctx, "entry_p");
-
+    // configuration parameters
+  SM3_process(&hash_ctx, (unsigned char*)(&(untrusted_ptr)),
+        sizeof(unsigned long));
+  SM3_process(&hash_ctx, (unsigned char*)(&(untrusted_size)),
+        sizeof(unsigned long));
+  SM3_process(&hash_ctx, (unsigned char*)(&(kbuffer_ptr)),
+        sizeof(unsigned long));
+  SM3_process(&hash_ctx, (unsigned char*)(&(kbuffer_size)),
+        sizeof(unsigned long));
   hash_enclave_mem(&hash_ctx, enclave_mem->enclave_root_pt,
       (VA_BITS - RISCV_PGSHIFT) / RISCV_PGLEVEL_BITS, 0, 1);
+    printf("%lx %lx %lx %lx\n", untrusted_ptr, untrusted_size, kbuffer_ptr, kbuffer_size);
 
   SM3_process(&hash_ctx, (unsigned char*)(&nonce), sizeof(uintptr_t));
 //   print_sm3_state(&hash_ctx, "nonce 0");

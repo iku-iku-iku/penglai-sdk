@@ -109,7 +109,7 @@ int penglai_enclave_create(struct penglai_enclave_user_param* enclave_param, enc
 	alloc_kbuffer(ENCLAVE_DEFAULT_KBUFFER_SIZE, &kbuffer_ptr, ENCLAVE_DEFAULT_KBUFFER, enclave_mem);
 
     unsigned char enclave_hash[HASH_SIZE];
-    hash_enclave(elf_entry, enclave_mem, (void*)enclave_hash, 0);
+    hash_enclave(elf_entry, enclave_mem, (void*)enclave_hash, 0, DEFAULT_UNTRUSTED_PTR, untrusted_mem_size, ENCLAVE_DEFAULT_KBUFFER, ENCLAVE_DEFAULT_KBUFFER_SIZE);
     printf("[load_enclave] hash with nonce: \n");
     printHex(enclave_hash, HASH_SIZE);
     
