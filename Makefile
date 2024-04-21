@@ -1,7 +1,7 @@
 all:
-	make -C musl
+#	make -C musl
 	make -C lib
-	make -C demo
+#	make -C demo
 
 clean:
 	make -C musl clean

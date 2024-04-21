@@ -1,5 +1,5 @@
-CC = riscv64-unknown-linux-gnu-gcc
-AR = riscv64-unknown-elf-ar
+# CC = riscv64-unknown-linux-gnu-gcc
+# AR = riscv64-unknown-elf-ar
 
 # LIBS = miracl.a  -lm
 

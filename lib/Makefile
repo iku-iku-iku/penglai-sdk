@@ -1,5 +1,5 @@
 all:
-	make -C app
+#	make -C app
 	make -C host
 	make -C gm
 
