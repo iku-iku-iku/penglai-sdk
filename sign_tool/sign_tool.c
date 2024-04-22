@@ -16,7 +16,7 @@
 #define MD_SIZE 64
 #define MAX_ELF_SIZE 512*1024*1024
 #define MAX_STACK_SIZE 64*1024*1024
-#define MAX_UNTRUSTED_MEM_SIZE 16*1024*1024
+#define MAX_UNTRUSTED_MEM_SIZE 256*1024
 
 typedef enum _file_path_t
 {
